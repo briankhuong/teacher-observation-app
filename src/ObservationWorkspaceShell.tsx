@@ -1224,6 +1224,11 @@ const toggleFavorite = (index: number) => {
                 if (filterMode === "good" && !ind.good) return null;
                 if (filterMode === "growth" && !ind.growth) return null;
                 if (filterMode === "favorites" && !ind.favorite) return null;
+
+                const hasInk = ind.strokes?.some((s) => s.points && s.points.length > 0);
+                const hasOcr = !!ind.ocrUsed;
+                const hasComment = ind.commentText.trim().length > 0;
+
                 return (
                   <div
                     key={ind.id}
@@ -1262,26 +1267,33 @@ const toggleFavorite = (index: number) => {
                         {expandedDesc[ind.id] ? "Show less" : "Show more"}
                       </button>
                     </div>
+
                     <div className="indicator-actions">
+                      {/* 🟢 Tiny status hints */}
+                      <div className="indicator-status-hints">
+                        {hasInk && <span className="hint-dot hint-ink" title="Has handwriting" />}
+                        {hasOcr && <span className="hint-dot hint-ocr" title="OCR converted" />}
+                        {hasComment && (
+                          <span className="hint-dot hint-comment" title="Has comment" />
+                        )}
+                      </div>
+
                       {/* Favorite toggle */}
                       <button
                         type="button"
-                        className="btn"
+                        className={`btn icon-toggle ${ind.favorite ? "is-on" : ""}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleFavorite(idx);
                         }}
                         title={ind.favorite ? "Unfavorite" : "Mark as favorite"}
                       >
-                        {ind.favorite ? "⭐" : "☆"}
+                        ⭐
                       </button>
 
-                      {/* ✅ Good toggle */}
                       <button
                         type="button"
-                        className={`btn indicator-good-btn ${
-                          ind.good ? "indicator-active" : ""
-                        }`}
+                        className={`btn icon-toggle ${ind.good ? "is-on" : ""}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleGood(idx);
@@ -1290,12 +1302,9 @@ const toggleFavorite = (index: number) => {
                         ✓
                       </button>
 
-                      {/* ✕ Growth toggle */}
                       <button
                         type="button"
-                        className={`btn indicator-growth-btn ${
-                          ind.growth ? "indicator-active" : ""
-                        }`}
+                        className={`btn icon-toggle ${ind.growth ? "is-on" : ""}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleGrowth(idx);
@@ -1307,7 +1316,7 @@ const toggleFavorite = (index: number) => {
                       {ind.hasPreComment && (
                         <button
                           type="button"
-                          className="btn"
+                          className="btn icon-toggle"
                           onClick={(e) => {
                             e.stopPropagation();
                             insertPreComment(idx);
@@ -1527,9 +1536,20 @@ const toggleFavorite = (index: number) => {
               });
 
                 const inkNotConverted = indicators.filter((ind) => {
-  const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
-  return hasInk && !ind.ocrUsed; // ❗ no good/growth requirement
-});
+                const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
+                return hasInk && !ind.ocrUsed; // ❗ no good/growth requirement
+              });
+
+              // 🔢 Fast lookup sets by indicator number
+              const growthNoCommentNums = new Set(
+                growthWithoutComment.map((ind) => ind.number)
+              );
+              const goodTemplateOnlyNums = new Set(
+                goodTemplateOnly.map((ind) => ind.number)
+              );
+              const inkNotConvertedNums = new Set(
+                inkNotConverted.map((ind) => ind.number)
+              );
 
                 const anyWarnings =
                   growthWithoutComment.length > 0 ||
@@ -1645,11 +1665,27 @@ const toggleFavorite = (index: number) => {
                     </div>
 
                     <div className="export-preview-table">
-                      {exportPreview.rows.map((row) => (
-                        <div
-                          key={row.rowIndex}
-                          className="export-preview-row"
-                        >
+                    {exportPreview.rows.map((row) => {
+                      const indicatorNum = row.indicatorLabel;
+
+                      const isGrowthNoComment = growthNoCommentNums.has(indicatorNum);
+                      const isTemplateOnly = goodTemplateOnlyNums.has(indicatorNum);
+                      const isInkNotConverted = inkNotConvertedNums.has(indicatorNum);
+
+                      const rowClassName = [
+                        "export-preview-row",
+                        (isGrowthNoComment || isTemplateOnly || isInkNotConverted)
+                          ? "export-preview-row-flagged"
+                          : "",
+                        isGrowthNoComment ? "export-preview-row-flagged-growth" : "",
+                        isTemplateOnly ? "export-preview-row-flagged-template" : "",
+                        isInkNotConverted ? "export-preview-row-flagged-ocr" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
+
+                      return (
+                        <div key={row.rowIndex} className={rowClassName}>
                           {/* LEFT COLUMN: indicator + description */}
                           <div className="export-preview-left">
                             <div className="export-preview-indicator">
@@ -1662,9 +1698,7 @@ const toggleFavorite = (index: number) => {
 
                           {/* RIGHT COLUMN: status + strengths + growths */}
                           <div className="export-preview-right">
-                            {(row.status ||
-                              row.strengths ||
-                              row.growths) && (
+                            {(row.status || row.strengths || row.growths) && (
                               <div className="export-preview-status-line">
                                 {row.status && (
                                   <span
@@ -1682,49 +1716,38 @@ const toggleFavorite = (index: number) => {
                                 )}
 
                                 <div className="export-preview-tags">
-                                  {row.strengths &&
-                                    row.strengths.trim().length > 0 && (
-                                      <span className="export-tag-good">
-                                        ✓ Good
-                                      </span>
-                                    )}
-                                  {row.growths &&
-                                    row.growths.trim().length > 0 && (
-                                      <span className="export-tag-growth">
-                                        ✕ Growth
-                                      </span>
-                                    )}
+                                  {row.strengths && row.strengths.trim().length > 0 && (
+                                    <span className="export-tag-good">✓ Good</span>
+                                  )}
+                                  {row.growths && row.growths.trim().length > 0 && (
+                                    <span className="export-tag-growth">✕ Growth</span>
+                                  )}
                                 </div>
                               </div>
                             )}
 
-                            {row.strengths &&
-                              row.strengths.trim().length > 0 && (
-                                <div className="export-preview-block">
-                                  <div className="export-preview-label export-label-good">
-                                    Teacher&apos;s Strengths
-                                  </div>
-                                  <div className="export-preview-text">
-                                    {row.strengths}
-                                  </div>
+                            {row.strengths && row.strengths.trim().length > 0 && (
+                              <div className="export-preview-block">
+                                <div className="export-preview-label export-label-good">
+                                  Teacher&apos;s Strengths
                                 </div>
-                              )}
+                                <div className="export-preview-text">{row.strengths}</div>
+                              </div>
+                            )}
 
-                            {row.growths &&
-                              row.growths.trim().length > 0 && (
-                                <div className="export-preview-block">
-                                  <div className="export-preview-label export-label-growth">
-                                    Teacher&apos;s Growth Areas
-                                  </div>
-                                  <div className="export-preview-text">
-                                    {row.growths}
-                                  </div>
+                            {row.growths && row.growths.trim().length > 0 && (
+                              <div className="export-preview-block">
+                                <div className="export-preview-label export-label-growth">
+                                  Teacher&apos;s Growth Areas
                                 </div>
-                              )}
+                                <div className="export-preview-text">{row.growths}</div>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
+                  </div>
                   </div>
                 );
               })()}
