@@ -219,6 +219,7 @@ export interface IndicatorStateForExport {
   good: boolean;
   growth: boolean;
   commentText: string;
+  includeInTrainerSummary?: boolean;
 }
 
 /** Two big areas in the teacher template */

@@ -281,10 +281,39 @@ body {
 }
 
 /* First line: teacher name (date is no longer part of the flex layout) */
-.obs-row-header {
+/* =========================
+   OBSERVATION CARDS
+   ========================= */
+.obs-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
+
+  width: 100%;
+  max-width: 580px;
+
+  padding: 14px 18px;
+  /* add extra right padding so the date has space */
+  padding-right: 90px;
+
+  margin-bottom: 14px;
+
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  backdrop-filter: blur(10px);
+
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 0.2s ease-out,
+    box-shadow 0.2s ease-out,
+    transform 0.2s ease-out,
+    border-color 0.2s ease-out;
+
+  /* so the date can be absolutely positioned inside */
+  position: relative;
 }
 
 /* Date pinned to top-right of the card, same spot for all rows */
@@ -329,9 +358,6 @@ body {
   margin-bottom: 8px;
 }
 
-/* Each observation card */
-
-
 .obs-row:hover {
   transform: translateY(-1px);
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.85);
@@ -366,15 +392,11 @@ body {
   gap: 4px;
 }
 
-/* First line: teacher name + date aligned horizontally */
-/* First line: teacher name + date aligned horizontally */
-
 /* Teacher name */
 .obs-teacher {
   font-size: 14px;
   font-weight: 600;
 }
-
 
 /* Meta line under the name */
 .obs-meta {
@@ -405,14 +427,65 @@ body {
   color: var(--text-muted);
 }
 
-/* Just in case something still relies on this class name,
-   keep it as an alias to the strip colors (not used for layout). */
+/* Alias for status colors (not used for layout) */
 .obs-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
 }
 
+/* =========================
+   DASHBOARD HEADER / SEARCH / SORT
+   ========================= */
+
+/* Title + subtitle + search on the left, controls on the right */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+/* Let the left block (title + search) grow */
+.card-header > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Toolbar that holds "Group by" and "Sort" */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+/* Each control block (label + select) */
+.toolbar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.toolbar-group span {
+  font-size: 11px;
+}
+
+/* Keep selects compact inside the header */
+.card-header .select {
+  min-width: 140px;
+  font-size: 12px;
+}
+
+/* Search input uses .select class; tweak a bit inside header only */
+.card-header input.select {
+  padding: 6px 10px;
+  height: auto;
+  line-height: 1.3;
+}
 
 /* Workspace layout */
 
@@ -463,10 +536,6 @@ body {
 }
 
 /* Indicators sidebar */
-
-/* === INDICATOR GOOD / GROWTH TOGGLES ============================ */
-
-/* --- Indicator hints --- */
 
 .indicator-actions {
   display: flex;
@@ -643,6 +712,37 @@ body {
   color: var(--text-muted);
   font-size: 11px;
   cursor: pointer;
+}
+
+/* Small dot cluster at the start of the action row */
+.indicator-status-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+}
+
+/* Base dot */
+.indicator-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* Has handwriting */
+.indicator-dot-ink {
+  background: #38bdf8; /* cyan-ish */
+}
+
+/* Has comment text */
+.indicator-dot-comment {
+  background: #a855f7; /* purple-ish */
+}
+
+/* OCR has been run */
+.indicator-dot-ocr {
+  background: #fbbf24; /* amber */
 }
 
 /* Canvas card + pad */
@@ -1280,4 +1380,199 @@ input[type="date"].input {
 .preview-indicator-link:hover {
   text-decoration: none;
   opacity: 0.9;
+}
+
+/* --- toolbar search input --- */
+.search-input {
+  min-width: 180px;
+}
+
+/* Compact select for status in the summary table */
+.select-compact {
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+/* ---------- AM SUMMARY MODAL ---------- */
+
+.am-summary-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.am-summary-modal {
+  width: min(1100px, 96vw);
+  max-height: 90vh;
+  background: #020617;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.95);
+}
+
+.am-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.am-summary-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.am-summary-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.am-summary-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.am-summary-sent {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* table wrapper scrolls if needed */
+.am-summary-table-wrapper {
+  border-radius: 10px;
+  border: 1px solid rgba(30, 64, 175, 0.6);
+  overflow: auto;
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.am-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.am-summary-table thead {
+  background: rgba(30, 64, 175, 0.9);
+}
+
+.am-summary-table th,
+.am-summary-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(30, 64, 175, 0.4);
+  vertical-align: top;
+}
+
+.am-summary-table th {
+  text-align: left;
+  font-weight: 600;
+}
+
+.am-summary-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.am-summary-table textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: 6px;
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  background: #020617;
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+/* email body section */
+.am-summary-email-section {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.am-summary-email-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.am-summary-email-textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  background: #020617;
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.am-summary-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.am-summary-sent-inline {
+  font-size: 11px;
+}
+
+.am-summary-empty {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* --- Rating buttons (Good / Growth) --- */
+.rating-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.9);
+  color: rgba(148, 163, 184, 0.9);
+  transition:
+    background 0.15s ease-out,
+    border-color 0.15s ease-out,
+    color 0.15s ease-out,
+    box-shadow 0.15s ease-out;
+}
+
+.rating-btn:hover {
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+}
+
+/* Good = teal/green when selected */
+.rating-good.rating-selected {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.9);
+  color: #bbf7d0;
+}
+
+/* Growth = amber/red when selected */
+.rating-growth.rating-selected {
+  background: rgba(248, 113, 113, 0.22);
+  border-color: rgba(248, 113, 113, 0.95);
+  color: #fecaca;
 }

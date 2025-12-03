@@ -83,6 +83,7 @@ interface IndicatorState {
   ocrLastRunAt?: number | null;
   ocrLastConfidence?: number | null; // later when we have real OCR
   ocrPendingReview?: boolean;        // true = show yellow highlight
+  includeInTrainerSummary?: boolean;  // true = include this indicator in trainer summary
 }
 
 interface SavedObservationPayload {
@@ -685,7 +686,7 @@ const handleBackToDashboard = () => {
     await exportTeacherExcel(model);
   };
 
-  const handleExportAdmin = async () => {
+const handleExportAdmin = async () => {
   // 1️⃣ If there is unsaved ink on the active indicator, flush it first
   if (canvasDirty) {
     handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -700,7 +701,7 @@ const handleBackToDashboard = () => {
     unit,
     lesson,
     supportType,
-    date: observationMeta.date, // may be undefined for older observations
+    date: observationMeta.date, // already wired
   };
 
   // 3️⃣ Flatten indicators into the generic export shape
@@ -712,15 +713,27 @@ const handleBackToDashboard = () => {
     good: ind.good,
     growth: ind.growth,
     commentText: ind.commentText,
+    // 🆕 make sure includeInTrainerSummary is passed through
+    includeInTrainerSummary: ind.includeInTrainerSummary ?? false,
   }));
 
-  // 4️⃣ Build ADMIN model + export
-  const adminModel = buildAdminExportModel(metaForExport, exportIndicators);
+  // 4️⃣ Build base ADMIN model from current state
+  const baseModel = buildAdminExportModel(metaForExport, exportIndicators);
+
+  // 5️⃣ If the Admin preview has been opened/edited, prefer those values
+  const modelToExport =
+    adminPreview && showAdminPreview
+      ? {
+          ...baseModel,
+          rows: adminPreview.rows,                 // use edited trainerNotes
+          trainerSummary: adminPreview.trainerSummary, // use edited summary
+        }
+      : baseModel;
 
   // Optional: log for debugging
-  console.log("ADMIN_EXPORT_MODEL", adminModel);
+  console.log("ADMIN_EXPORT_MODEL", modelToExport);
 
-  await exportAdminExcel(adminModel);
+  await exportAdminExcel(modelToExport);
 };
 
   
@@ -742,15 +755,16 @@ const handleExportPreview = () => {
      date: observationMeta.date, // "YYYY-MM-DD"
   };
 
-  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
-    id: ind.id,
-    number: ind.number,
-    title: ind.title,
-    description: ind.description,
-    good: ind.good,
-    growth: ind.growth,
-    commentText: ind.commentText,
-  }));
+ const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
+  id: ind.id,
+  number: ind.number,
+  title: ind.title,
+  description: ind.description,
+  good: ind.good,
+  growth: ind.growth,
+  commentText: ind.commentText,
+  includeInTrainerSummary: !!ind.includeInTrainerSummary, // 🆕
+}));
 
   const model = buildTeacherExportModel(metaForExport, exportIndicators);
 
@@ -759,6 +773,7 @@ const handleExportPreview = () => {
 };
 
 //admin preview
+// admin preview
 const handleAdminPreview = () => {
   // flush canvas first
   if (canvasDirty) {
@@ -784,6 +799,8 @@ const handleAdminPreview = () => {
     good: ind.good,
     growth: ind.growth,
     commentText: ind.commentText,
+    // ✅ pass Trainer-summary flag through to the export model
+    includeInTrainerSummary: !!ind.includeInTrainerSummary,
   }));
 
   const model = buildAdminExportModel(metaForExport, exportIndicators);
@@ -922,6 +939,12 @@ const toggleFavorite = (index: number) => {
   updateIndicator(index, { favorite: !target.favorite });
 };
 
+const toggleIncludeInTrainerSummary = (index: number) => {
+  const target = indicators[index];
+  updateIndicator(index, {
+    includeInTrainerSummary: !target.includeInTrainerSummary,
+  });
+};
 
   const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
     setIndicators((prev) =>
@@ -1268,64 +1291,104 @@ const toggleFavorite = (index: number) => {
                       </button>
                     </div>
 
-                    <div className="indicator-actions">
-                      {/* 🟢 Tiny status hints */}
-                      <div className="indicator-status-hints">
-                        {hasInk && <span className="hint-dot hint-ink" title="Has handwriting" />}
-                        {hasOcr && <span className="hint-dot hint-ocr" title="OCR converted" />}
-                        {hasComment && (
-                          <span className="hint-dot hint-comment" title="Has comment" />
-                        )}
-                      </div>
-
-                      {/* Favorite toggle */}
-                      <button
-                        type="button"
-                        className={`btn icon-toggle ${ind.favorite ? "is-on" : ""}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleFavorite(idx);
-                        }}
-                        title={ind.favorite ? "Unfavorite" : "Mark as favorite"}
-                      >
-                        ⭐
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`btn icon-toggle ${ind.good ? "is-on" : ""}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleGood(idx);
-                        }}
-                      >
-                        ✓
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`btn icon-toggle ${ind.growth ? "is-on" : ""}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleGrowth(idx);
-                        }}
-                      >
-                        ✕
-                      </button>
-
-                      {ind.hasPreComment && (
-                        <button
-                          type="button"
-                          className="btn icon-toggle"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            insertPreComment(idx);
-                          }}
-                        >
-                          💬
-                        </button>
+                   <div className="indicator-actions">
+                    {/* status dots: ink / text / OCR */}
+                    <div className="indicator-status-dots"
+                        onClick={(e) => e.stopPropagation()}
+                        title={[
+                          (ind.strokes && ind.strokes.length > 0) ? "Has handwriting" : "",
+                          ind.commentText?.trim().length > 0 ? "Has comment" : "",
+                          ind.ocrUsed ? "OCR has been run" : "",
+                        ].filter(Boolean).join(" • ")}
+                    >
+                      {ind.strokes && ind.strokes.length > 0 && (
+                        <span className="indicator-dot indicator-dot-ink" />
+                      )}
+                      {ind.commentText && ind.commentText.trim().length > 0 && (
+                        <span className="indicator-dot indicator-dot-comment" />
+                      )}
+                      {ind.ocrUsed && (
+                        <span className="indicator-dot indicator-dot-ocr" />
                       )}
                     </div>
+
+                    {/* Favorite toggle */}
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavorite(idx);
+                      }}
+                      title={ind.favorite ? "Unfavorite" : "Mark as favorite"}
+                    >
+                      {ind.favorite ? "⭐" : "☆"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`btn rating-btn rating-good ${
+                        ind.good ? "rating-selected" : ""
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleGood(idx);
+                      }}
+                      title="Mark as Good point"
+                    >
+                      ✓
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`btn rating-btn rating-growth ${
+                        ind.growth ? "rating-selected" : ""
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleGrowth(idx);
+                      }}
+                      title="Mark as Growth area"
+                    >
+                      ✕
+                    </button>
+
+                    {ind.hasPreComment && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          insertPreComment(idx);
+                        }}
+                        title="Insert pre-created comment"
+                      >
+                        💬
+                      </button>
+                    )}
+
+                    {/* 🆕 Trainer summary checkbox */}
+                    <label
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        marginLeft: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: 10,
+                        color: "var(--text-muted)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!ind.includeInTrainerSummary}
+                        onChange={() => toggleIncludeInTrainerSummary(idx)}
+                        style={{ width: 12, height: 12 }}
+                      />
+                      <span>Trainer summary</span>
+                    </label>
+                  </div>
                   </div>
                 );
               })}
@@ -1747,7 +1810,7 @@ const toggleFavorite = (index: number) => {
                         </div>
                       );
                     })}
-                  </div>
+                    </div>
                   </div>
                 );
               })()}
@@ -1774,13 +1837,65 @@ const toggleFavorite = (index: number) => {
                     Close
                   </button>
                 </div>
-
+                {/* 🆕 Trainer summary section (mapped to merged cell E5–E18) */}
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid rgba(148, 163, 184, 0.35)",
+                    background: "rgba(15, 23, 42, 0.9)",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      marginBottom: 4,
+                    }}
+                  >
+                    Trainer summary (Admin sheet – merged cell E5–E18)
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-muted)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Built automatically from indicators you checked as{" "}
+                    <em>Trainer summary</em>. You can edit / translate it here before
+                    exporting.
+                  </div>
+                  <textarea
+                    value={adminPreview.trainerSummary ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setAdminPreview((prev) =>
+                        prev ? { ...prev, trainerSummary: value } : prev
+                      );
+                    }}
+                    rows={4}
+                    style={{
+                      width: "100%",
+                      resize: "vertical",
+                      borderRadius: 8,
+                      border: "1px solid rgba(51,65,85,0.9)",
+                      background: "#020617",
+                      color: "var(--text)",
+                      padding: 8,
+                      fontSize: 12,
+                      lineHeight: 1.4,
+                    }}
+                  />
+                </div>            
                 <div className="export-preview-table">
                   {adminPreview.rows.map((row) => (
                     <div
                       key={row.rowIndex}
                       className="export-preview-row admin-row"
                     >
+                      {/* Left: category + aspect */}
                       <div className="export-preview-indicator">
                         <div className="admin-main-category">
                           {row.mainCategory}
@@ -1788,16 +1903,47 @@ const toggleFavorite = (index: number) => {
                         <div className="admin-aspect">{row.aspect}</div>
                       </div>
 
+                      {/* Middle: VN classroom signs (read-only) */}
                       <div className="export-preview-description">
                         {row.classroomSigns}
                       </div>
 
+                      {/* Rating (still read-only for now, coming from export model) */}
                       <div className="export-preview-status">
                         {row.trainerRating || "\u00A0"}
                       </div>
 
+                      {/* 🆕 Trainer notes: editable textarea */}
                       <div className="export-preview-notes">
-                        {row.trainerNotes || "\u00A0"}
+                        <textarea
+                          value={row.trainerNotes}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setAdminPreview((prev) => {
+                              if (!prev) return prev;
+                              return {
+                                ...prev,
+                                rows: prev.rows.map((r) =>
+                                  r.rowIndex === row.rowIndex
+                                    ? { ...r, trainerNotes: value }
+                                    : r
+                                ),
+                              };
+                            });
+                          }}
+                          rows={3}
+                          style={{
+                            width: "100%",
+                            resize: "vertical",
+                            borderRadius: 8,
+                            border: "1px solid rgba(51,65,85,0.9)",
+                            background: "#020617",
+                            color: "var(--text)",
+                            padding: 6,
+                            fontSize: 12,
+                            lineHeight: 1.4,
+                          }}
+                        />
                       </div>
                     </div>
                   ))}

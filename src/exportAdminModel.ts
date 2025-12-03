@@ -32,6 +32,16 @@ export interface AdminExportModel {
   schoolName: string;
   supportType: string;
   teacherName: string;
+
+  /**
+   * 🆕 Trainer summary for merged cell (E5–E18).
+   * Built from indicators where `includeInTrainerSummary === true`.
+   * Format:
+   * - First flagged comment
+   * - Second flagged comment
+   * ...
+   */
+  trainerSummary: string;
 }
 
 // -------------------------------
@@ -40,9 +50,9 @@ export interface AdminExportModel {
 
 interface AdminLayoutItem {
   rowIndex: number;
-  mainCategory: string;      // Mục chính
-  aspect: string;            // Khía cạnh
-  vnSigns: string;           // Biểu hiện lớp học (VN text)
+  mainCategory: string;       // Mục chính
+  aspect: string;             // Khía cạnh
+  vnSigns: string;            // Biểu hiện lớp học (VN text)
   indicatorNumbers: string[]; // EXACT IndicatorState.number values to pull from
 }
 
@@ -176,13 +186,17 @@ export const ADMIN_LAYOUT: AdminLayoutItem[] = [
 ];
 
 // -------------------------------
-// BUILD ADMIN EXPORT MODEL
+// NOTE TEXT (right header)
 // -------------------------------
 
 const ADMIN_NOTE_TEXT = `Lưu ý:
 + Nhận xét dưới đây của Trainer chỉ áp dụng cho từng sự kiện hỗ trợ giáo viên (Dự giờ lớp học hoặc Xem & phân tích video lớp học).
 + Những nhận xét này không phản ánh hoàn toàn bộ năng lực giảng dạy của giáo viên hay đánh giá tất cả các lớp GrapeSEED mà giáo viên đang phụ trách, do mỗi lớp có đặc thù riêng và nội dung giảng dạy có thể khác nhau theo từng Unit.
 + Đối với một số khía cạnh chưa được thể hiện rõ, Trainer sẽ đánh dấu là "Không áp dụng".`;
+
+// -------------------------------
+// BUILD ADMIN EXPORT MODEL
+// -------------------------------
 
 export function buildAdminExportModel(
   meta: ObservationMetaForExport,
@@ -195,6 +209,19 @@ export function buildAdminExportModel(
     indicators.map((i) => [i.number, i])
   );
 
+  // 🆕 Build trainer summary from flagged indicators
+  const summaryLines: string[] = [];
+  for (const ind of indicators) {
+    if (!ind.includeInTrainerSummary) continue;
+    const comment = ind.commentText?.trim();
+    if (!comment) continue;
+
+    // Requirement: no indicator numbers in front, just pure comments.
+    summaryLines.push(`- ${comment}`);
+  }
+  const trainerSummary = summaryLines.join("\n");
+
+  // Build each admin table row
   const rows: AdminExportRow[] = ADMIN_LAYOUT.map((cfg) => {
     // collect all indicators linked to this row
     const sources = cfg.indicatorNumbers
@@ -220,7 +247,7 @@ export function buildAdminExportModel(
     } else if (goodCount > 0 && growthCount > 0) {
       trainerRating = "Rất tốt";
     }
-    // if both are 0 → keep "" (you can later change this to "Không áp dụng")
+    // if both are 0 → keep "" (later you can turn into "Không áp dụng" if you want)
 
     const trainerNotes = notePieces.join("\n\n");
 
@@ -245,16 +272,12 @@ export function buildAdminExportModel(
     `Các GV nhận hỗ trợ: ${meta.teacherName}`,
   ].filter(Boolean);
 
-  const headerRight = [
-    "Lưu ý:",
-    "+ Nhận xét dưới đây của Trainer chỉ áp dụng cho từng sự kiện hỗ trợ giáo viên (Dự giờ lớp học hoặc Xem & phân tích video lớp học).",
-    "+ Nhận định này không phản ánh toàn bộ năng lực giảng dạy của giáo viên hay đánh giá các lớp GrapeSEED mà giáo viên đang phụ trách, do mỗi lớp có thời lượng và nội dung giảng dạy có thể khác nhau theo từng Unit.",
-    "+ Đối với một số khía cạnh chưa được thể hiện rõ, Trainer sẽ đánh dấu là \"Không áp dụng\".",
-  ].join("\n");
+  const headerLeft = headerLeftLines.join("\n");
+  const headerRight = ADMIN_NOTE_TEXT;
 
   return {
     sheetName,
-    headerLeft: headerLeftLines.join("\n"),
+    headerLeft,
     headerRight,
     rows,
     fileDate,
@@ -262,5 +285,6 @@ export function buildAdminExportModel(
     schoolName: meta.schoolName,
     supportType: meta.supportType,
     teacherName: meta.teacherName,
+    trainerSummary, // 🆕 for merged cell E5–E18
   };
 }
