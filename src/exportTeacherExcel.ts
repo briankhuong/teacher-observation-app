@@ -40,14 +40,14 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
 
   // ---- Column widths ----
   ws.columns = [
-    { key: "area", width: 4 },        // A
-    { key: "indicator", width: 28 },  // B
-    { key: "explanation", width: 42 },// C
-    { key: "checklist", width: 12 },  // D (checkbox-ish)
-    { key: "status", width: 14 },     // E (Done / Pending via formula)
-    { key: "strengths", width: 40 },  // F
-    { key: "growths", width: 40 },    // G
-    { key: "nextsteps", width: 40 },  // H
+    { key: "area", width: 4 }, // A
+    { key: "indicator", width: 28 }, // B
+    { key: "explanation", width: 42 }, // C
+    { key: "checklist", width: 12 }, // D
+    { key: "status", width: 14 }, // E
+    { key: "strengths", width: 40 }, // F
+    { key: "growths", width: 40 }, // G
+    { key: "nextsteps", width: 40 }, // H
   ];
 
   // ---- Row 1: header block (A1:H1 merged) ----
@@ -63,11 +63,10 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
   a1.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFE5E5E5" }, // neutral light grey
+    fgColor: { argb: "FFE5E5E5" }, // light grey similar to your template
   };
 
   // ---- Row 2: Section headers ----
-  // A2–C2: GUIDE block (FFC599)
   ws.mergeCells("A2:C2");
   const guideCell = ws.getCell("A2");
   guideCell.value = "GUIDE TO TEACHING GRAPESEED";
@@ -76,10 +75,9 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
   guideCell.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFFFC599" }, // FFC599
+    fgColor: { argb: "FFFFC599" }, // updated color
   };
 
-  // D2–G2: Trainer's comments (keep merged as before, but now yellow)
   ws.mergeCells("D2:G2");
   const trainerCell = ws.getCell("D2");
   trainerCell.value = "TRAINER'S COMMENTS";
@@ -88,10 +86,9 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
   trainerCell.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFFFFF00" }, // FFFF00
+    fgColor: { argb: "FFFFFF00" }, // updated color
   };
 
-  // H2: NEXT STEPS header (keep as separate block, red-ish)
   const nextStepsHeader = ws.getCell("H2");
   nextStepsHeader.value = "NEXT STEPS";
   nextStepsHeader.font = { bold: true };
@@ -99,7 +96,7 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
   nextStepsHeader.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFFFC7CE" }, // light red
+    fgColor: { argb: "FFFFFF00" }, // updated color
   };
 
   // ---- Row 3: Table headers ----
@@ -120,37 +117,30 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
     horizontal: "center",
     wrapText: true,
   };
-
-  // Colors row 3:
-  // A–C: same as A2–C2 → FFC599
   ["A3", "B3", "C3"].forEach((addr) => {
     ws.getCell(addr).fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { argb: "FFFFC599" },
+      fgColor: { argb: "FFFFC599" }, // updated color
     };
   });
-
-  // D–G: same yellow as trainer block (approx for "G–J" in your template)
   ["D3", "E3", "F3", "G3"].forEach((addr) => {
     ws.getCell(addr).fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { argb: "FFFFFF00" },
+      fgColor: { argb: "FFFFFF00" }, // updated color
     };
   });
-
-  // H3: same as H2 (Next Steps header area) → light red
   ws.getCell("H3").fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFFFC7CE" },
+    fgColor: { argb: "FFFFFF00" }, // updated color
   };
 
   // ---- Area labels in column A (vertical text) ----
   ws.getColumn("A").width = 4;
 
-  // LEARNING ENVIRONMENT: rows 4–6, merged A4:A6, color D1F1DA
+  // LEARNING ENVIRONMENT: rows 4–6
   ws.mergeCells("A4:A6");
   const area1 = ws.getCell("A4");
   area1.value = "LEARNING ENVIRONMENT";
@@ -164,10 +154,10 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
   area1.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFD1F1DA" }, // D1F1DA
+    fgColor: { argb: "FFD1F1DA" }, // D1F1DA with alpha
   };
 
-  // PREPARATION & REFLECTION & INSTRUCTIONAL DELIVERY: rows 7–21, A7:A21, FFCCFF
+  // PREPARATION AND REFLECTION & INSTRUCTIONAL DELIVERY: rows 7–21
   ws.mergeCells("A7:A21");
   const area2 = ws.getCell("A7");
   area2.value = "PREPARATION AND REFLECTION & INSTRUCTIONAL DELIVERY";
@@ -181,13 +171,13 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
   area2.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FFFFCCFF" }, // FFCCFF
+    fgColor: { argb: "FFFFCCFF" }, // FFCCFF with alpha
   };
 
   // ---- Next steps area: H4:H21 merged ----
   ws.mergeCells("H4:H21");
   const nextStepsCell = ws.getCell("H4");
-  nextStepsCell.value = ""; // you can fill later if you like
+  nextStepsCell.value = ""; // you will fill later
   nextStepsCell.alignment = {
     vertical: "top",
     horizontal: "left",
@@ -200,64 +190,62 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
     r.getCell("B").value = row.indicatorLabel;
     r.getCell("C").value = row.description;
 
-    // D: "checkbox" via dropdown (✓ or blank)
-    const dCell = r.getCell("D");
-    const isDone = row.status === "Done";
-    dCell.value = isDone ? "✓" : "";
-    dCell.alignment = {
-      vertical: "middle",
-      horizontal: "center",
-      wrapText: true,
-    };
-    dCell.dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: ['"✓,"'], // options: "✓" and empty
-      showInputMessage: true,
-      promptTitle: "Checklist",
-      prompt: 'Choose "✓" if this indicator is complete.',
-    };
+    // Checklist (tick or empty) – still write whatever the model has
+    r.getCell("D").value = row.checklist;
 
-    // E: Done/Pending driven by D
-    const eCell = r.getCell("E");
-    const rowNum = row.rowIndex;
-    eCell.value = {
-      formula: `IF(D${rowNum}="✓","Done","Pending")`,
-      result: isDone ? "Done" : "Pending",
-    };
-    eCell.alignment = {
-      vertical: "middle",
-      horizontal: "center",
-      wrapText: true,
-    };
+    // Status: formula depends on D; result is the current status string
+    const statusCell = r.getCell("E");
+    statusCell.value = {
+      formula: `IF(D${row.rowIndex}="✓","Done","Pending")`,
+      result: (row as any).status || "",
+    } as any;
 
-    // F & G: strengths/growths (cleaned OCR, but no [OCR] tag)
     r.getCell("F").value = cleanOcrText(row.strengths) || "";
     r.getCell("G").value = cleanOcrText(row.growths) || "";
 
-    ["F", "G"].forEach((col) => {
+    // Basic alignment & wrap text for B–G
+    ["B", "C", "D", "E", "F", "G"].forEach((col) => {
       const cell = r.getCell(col);
       cell.alignment = {
         vertical: "top",
-        horizontal: "left",
-        wrapText: true,
-      };
-    });
-
-    // Basic alignment for B, C as well
-    ["B", "C"].forEach((col) => {
-      const cell = r.getCell(col);
-      cell.alignment = {
-        vertical: "top",
-        horizontal: "left",
+        horizontal: col === "D" || col === "E" ? "center" : "left",
         wrapText: true,
       };
     });
   });
 
+  // ---- Checklist dropdown on D4:D21 (✓ or blank) ----
+  // TS types for dataValidations are missing in some versions, so ignore.
+  // @ts-ignore
+  ws.dataValidations.add("D4:D21", {
+    type: "list",
+    allowBlank: true,
+    formulae: ['"✓,"'], // list with ✓ and an empty entry
+  });
+
+  // ---- Conditional formatting: E = "Done" → purple fill ----
+  ws.addConditionalFormatting({
+    ref: "E4:E21",
+    rules: [
+      {
+        type: "expression",
+        priority: 1,
+        // Excel will shift the row part for each cell in E4:E21
+        formulae: ['=$E4="Done"'],
+        style: {
+          fill: {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFCC66FF" }, // CC66FF with alpha
+          },
+        },
+      },
+    ],
+  });
+
   // ---- Light borders for the table (A3:G21) ----
   for (let row = 3; row <= 21; row++) {
-    for (const col of ["A", "B", "C", "D", "E", "F", "G", "H"]) {
+    for (const col of ["A", "B", "C", "D", "E", "F", "G"]) {
       const cell = ws.getCell(`${col}${row}`);
       cell.border = {
         top: { style: "thin", color: { argb: "FFAAAAAA" } },
@@ -268,22 +256,24 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
     }
   }
 
-  // ---- Highlight Status when Done (CC66FF) ----
-  for (let rowNum = 4; rowNum <= 21; rowNum++) {
-    const eCell = ws.getCell(`E${rowNum}`);
-    const current = (eCell.value as any)?.result ?? eCell.value;
-
-    if (current === "Done") {
-      eCell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFCC66FF" }, // CC66FF
-      };
-    }
-  }
-
   // Freeze header row (row 3)
   ws.views = [{ state: "frozen", xSplit: 0, ySplit: 3 }];
+
+  // ---- Generate file & download ----
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  // Build cleaned, user-friendly file name
+  const teacher = sanitizeFilePart(model.teacherName);
+  const school = sanitizeFilePart(model.schoolName);
+  const dateLabel = model.fileDate; // already "YYYY.MM.DD"
+
+  // Final filename: Teacher - School - YYYY.MM.DD.xlsx
+  const filename = `${teacher} - ${school} - ${dateLabel}.xlsx`;
+
+  saveAs(blob, filename);
 
   // Header heights
   ws.getRow(1).height = 60;
@@ -294,19 +284,7 @@ export async function exportTeacherExcel(model: TeacherExportModel) {
   for (let r = 4; r <= 21; r++) {
     ws.getRow(r).height = 110;
   }
-  // Very long row (3.3 + 6.1 + 7.2) if needed
+
+  // Very long row (3.3 + 6.1 + 7.2)
   ws.getRow(12).height = 140;
-
-  // ---- Generate file & download ----
-  const buffer = await wb.xlsx.writeBuffer();
-  const blob = new Blob([buffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-
-  const teacher = sanitizeFilePart(model.teacherName);
-  const school = sanitizeFilePart(model.schoolName);
-  const dateLabel = model.fileDate; // "YYYY.MM.DD"
-
-  const filename = `${teacher} - ${school} - ${dateLabel}.xlsx`;
-  saveAs(blob, filename);
 }
