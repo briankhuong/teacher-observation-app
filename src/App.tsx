@@ -1,7 +1,9 @@
+// src/App.tsx
 import React, { useState } from "react";
 import { DashboardShell } from "./DashboardShell";
 import { SCHOOL_MASTER_LIST } from "./schoolMaster";
 import { ObservationWorkspaceShell } from "./ObservationWorkspaceShell";
+import { useAuth } from "./auth/AuthContext";
 
 type Screen = "dashboard" | "workspace";
 type SupportType = "Training" | "LVA" | "Visit";
@@ -20,7 +22,7 @@ interface SelectedObservationMeta extends NewObservationMeta {
   id: string;
 }
 
-// Temporary demo observation
+// Temporary demo observation (can delete later)
 const MOCK_OBS: SelectedObservationMeta = {
   id: "demo-1",
   teacherName: "Daisy Nguyen",
@@ -33,6 +35,7 @@ const MOCK_OBS: SelectedObservationMeta = {
 };
 
 const App: React.FC = () => {
+  const { user, signOut } = useAuth(); // 🆕 Supabase auth
   const [showNewObservationForm, setShowNewObservationForm] = useState(false);
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [selectedObservation, setSelectedObservation] =
@@ -49,7 +52,7 @@ const App: React.FC = () => {
   };
 
   // Called when user clicks a card in the Dashboard
-  // Dashboard may or may not send a date yet → we fallback to today
+  // Dashboard may or may not send a date yet → fallback to today
   const openObservation = (obs: any) => {
     const withDate: SelectedObservationMeta = {
       id: obs.id,
@@ -73,7 +76,9 @@ const App: React.FC = () => {
           <span className="tag-pill">iPad • Pencil • Excel export</span>
         </div>
         <div className="top-bar-right">
-          <span className="badge">Trainer: Brian</span>
+          <span className="badge">
+            Trainer: {user?.email ?? "Unknown user"}
+          </span>
           <button className="btn-ghost" onClick={goToDashboard}>
             Dashboard
           </button>
@@ -83,6 +88,14 @@ const App: React.FC = () => {
             onClick={() => setShowNewObservationForm(true)}
           >
             New Observation
+          </button>
+          <button
+            className="btn-ghost"
+            type="button"
+            onClick={signOut}
+            style={{ marginLeft: 8 }}
+          >
+            Sign out
           </button>
         </div>
       </header>
