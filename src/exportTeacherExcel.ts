@@ -8,283 +8,111 @@ function sanitizeFilePart(part: string): string {
   return part.replace(/[\\/:*?"<>|]/g, "").trim() || "Untitled";
 }
 
-/** Some characters are not allowed in Excel sheet names. */
-function sanitizeSheetName(name: string): string {
-  // Remove characters Excel doesn't like and trim to 31 chars
-  return name.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Sheet1";
-}
-
-// Strip internal OCR markers like "[OCR]" before writing to Excel
+/** Strip internal OCR markers like "[OCR]" before writing to Excel. */
 function cleanOcrText(text?: string | null): string {
   if (!text) return "";
-
   let cleaned = text;
-
-  // Remove the [OCR] label (any case) plus any spaces/newlines right after it
   cleaned = cleaned.replace(/\[OCR\]\s*/gi, "");
-
-  // Collapse 3+ blank lines into just 2
   cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
-
-  // Trim leading/trailing whitespace
-  cleaned = cleaned.trim();
-
-  return cleaned;
+  return cleaned.trim();
 }
+
+// URL where the template is served (public/TeacherTemplate.xlsx)
+const TEMPLATE_URL = "/TeacherTemplate.xlsx";
 
 /** Build and download the Teacher Excel workbook from the export model. */
 export async function exportTeacherExcel(model: TeacherExportModel) {
+  // 1) Load the template workbook instead of creating a new one
   const wb = new ExcelJS.Workbook();
-  const sheetName = sanitizeSheetName(model.sheetName);
-  const ws = wb.addWorksheet(sheetName);
 
-  // ---- Column widths ----
-  ws.columns = [
-    { key: "area", width: 4 }, // A
-    { key: "indicator", width: 28 }, // B
-    { key: "explanation", width: 42 }, // C
-    { key: "checklist", width: 12 }, // D
-    { key: "status", width: 14 }, // E
-    { key: "strengths", width: 40 }, // F
-    { key: "growths", width: 40 }, // G
-    { key: "nextsteps", width: 40 }, // H
-  ];
+  const resp = await fetch(TEMPLATE_URL);
+  const arrayBuffer = await resp.arrayBuffer();
+  await wb.xlsx.load(arrayBuffer);
 
-  // ---- Row 1: header block (A1:H1 merged) ----
-  ws.mergeCells("A1:H1");
-  const a1 = ws.getCell("A1");
-  a1.value = model.headerBlock;
-  a1.alignment = {
-    vertical: "top",
-    horizontal: "left",
-    wrapText: true,
-  };
-  a1.font = { size: 11, bold: false };
-  a1.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFE5E5E5" }, // light grey similar to your template
-  };
+  // 2) Get the first worksheet (your template only has one)
+  const ws = wb.worksheets[0];
 
-  // ---- Row 2: Section headers ----
-  ws.mergeCells("A2:C2");
-  const guideCell = ws.getCell("A2");
-  guideCell.value = "GUIDE TO TEACHING GRAPESEED";
-  guideCell.font = { bold: true };
-  guideCell.alignment = { vertical: "middle", horizontal: "center" };
-  guideCell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFFFC599" }, // updated color
-  };
+  // IMPORTANT:
+  // We do NOT touch any dataValidations or conditional formatting here.
+  // The template already has:
+  //  - the dropdown on Rating column
+  //  - CF rules that color the cell based on the selected value
 
-  ws.mergeCells("D2:G2");
-  const trainerCell = ws.getCell("D2");
-  trainerCell.value = "TRAINER'S COMMENTS";
-  trainerCell.font = { bold: true };
-  trainerCell.alignment = { vertical: "middle", horizontal: "center" };
-  trainerCell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFFFFF00" }, // updated color
-  };
+  // ---- Header block (A1) ----
+  // In your template, A1 is the big merged header "GrapeSEED Trainer …"
+  ws.getCell("A1").value = model.headerBlock;
 
-  const nextStepsHeader = ws.getCell("H2");
-  nextStepsHeader.value = "NEXT STEPS";
-  nextStepsHeader.font = { bold: true };
-  nextStepsHeader.alignment = { vertical: "middle", horizontal: "center" };
-  nextStepsHeader.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFFFFF00" }, // updated color
-  };
-
-  // ---- Row 3: Table headers ----
-  const headerRow = ws.getRow(3);
-  headerRow.values = [
-    "Area",
-    "Indicator",
-    "Further Explanation",
-    "Checklist",
-    "Status",
-    "Teacher's Strengths",
-    "Teacher's Growth Areas",
-    "", // H is Next Steps overall (header already in row 2)
-  ];
-  headerRow.font = { bold: true };
-  headerRow.alignment = {
-    vertical: "middle",
-    horizontal: "center",
-    wrapText: true,
-  };
-  ["A3", "B3", "C3"].forEach((addr) => {
-    ws.getCell(addr).fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFFFC599" }, // updated color
-    };
-  });
-  ["D3", "E3", "F3", "G3"].forEach((addr) => {
-    ws.getCell(addr).fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFFFFF00" }, // updated color
-    };
-  });
-  ws.getCell("H3").fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFFFFF00" }, // updated color
-  };
-
-  // ---- Area labels in column A (vertical text) ----
-  ws.getColumn("A").width = 4;
-
-  // LEARNING ENVIRONMENT: rows 4–6
-  ws.mergeCells("A4:A6");
-  const area1 = ws.getCell("A4");
-  area1.value = "LEARNING ENVIRONMENT";
-  area1.alignment = {
-    vertical: "middle",
-    horizontal: "center",
-    wrapText: true,
-    textRotation: 90,
-  };
-  area1.font = { bold: true };
-  area1.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFD1F1DA" }, // D1F1DA with alpha
-  };
-
-  // PREPARATION AND REFLECTION & INSTRUCTIONAL DELIVERY: rows 7–21
-  ws.mergeCells("A7:A21");
-  const area2 = ws.getCell("A7");
-  area2.value = "PREPARATION AND REFLECTION & INSTRUCTIONAL DELIVERY";
-  area2.alignment = {
-    vertical: "middle",
-    horizontal: "center",
-    wrapText: true,
-    textRotation: 90,
-  };
-  area2.font = { bold: true };
-  area2.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFFFCCFF" }, // FFCCFF with alpha
-  };
-
-  // ---- Next steps area: H4:H21 merged ----
-  ws.mergeCells("H4:H21");
-  const nextStepsCell = ws.getCell("H4");
-  nextStepsCell.value = ""; // you will fill later
-  nextStepsCell.alignment = {
-    vertical: "top",
-    horizontal: "left",
-    wrapText: true,
-  };
-
-  // ---- Body rows (4–21) from model.rows ----
+  // ---- Body rows (your model.rows already uses template row numbers) ----
   model.rows.forEach((row) => {
     const r = ws.getRow(row.rowIndex);
+
+    // B: Indicator label (e.g. "1.1 — Organized Teaching Area")
     r.getCell("B").value = row.indicatorLabel;
+
+    // C: Further explanation
     r.getCell("C").value = row.description;
 
-    // Checklist (tick or empty) – still write whatever the model has
+    // D: Rating text ("Good" | "Need some work" | "Not applicable")
+    // You already convert good/growth/blank into this in buildTeacherExportModel
     r.getCell("D").value = row.checklist;
 
-    // Status: formula depends on D; result is the current status string
-    const statusCell = r.getCell("E");
-    statusCell.value = {
-      formula: `IF(D${row.rowIndex}="✓","Done","Pending")`,
-      result: (row as any).status || "",
-    } as any;
+    // E: Teacher's Strengths
+    r.getCell("E").value = cleanOcrText(row.strengths) || "";
 
-    r.getCell("F").value = cleanOcrText(row.strengths) || "";
-    r.getCell("G").value = cleanOcrText(row.growths) || "";
+    // F: Teacher's Growth Areas
+    r.getCell("F").value = cleanOcrText(row.growths) || "";
 
-    // Basic alignment & wrap text for B–G
-    ["B", "C", "D", "E", "F", "G"].forEach((col) => {
+    // G (Next steps) stays as in the template – trainer can type later.
+
+    // Alignment only – we don't set any fill, so we don't override template CF
+    ["B", "C", "D", "E", "F"].forEach((col) => {
       const cell = r.getCell(col);
       cell.alignment = {
         vertical: "top",
-        horizontal: col === "D" || col === "E" ? "center" : "left",
+        horizontal: col === "D" ? "center" : "left",
         wrapText: true,
       };
     });
   });
 
-  // ---- Checklist dropdown on D4:D21 (✓ or blank) ----
-  // TS types for dataValidations are missing in some versions, so ignore.
-  // @ts-ignore
-  ws.dataValidations.add("D4:D21", {
-    type: "list",
-    allowBlank: true,
-    formulae: ['"✓,"'], // list with ✓ and an empty entry
-  });
+  // (Optional) row heights – if your template already has them set,
+  // you can keep or remove this. It just enforces tall rows.
+  for (let r = 4; r <= 21; r++) {
+    ws.getRow(r).height = 110;
+  }
+  ws.getRow(12).height = 140; // long row
 
-  // ---- Conditional formatting: E = "Done" → purple fill ----
-  ws.addConditionalFormatting({
-    ref: "E4:E21",
-    rules: [
-      {
-        type: "expression",
-        priority: 1,
-        // Excel will shift the row part for each cell in E4:E21
-        formulae: ['=$E4="Done"'],
-        style: {
-          fill: {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFCC66FF" }, // CC66FF with alpha
-          },
-        },
-      },
-    ],
-  });
+  // ---------------------------------------------------------
+  // MERGE G2:G3 (Next Steps header should be one block)
+  // ---------------------------------------------------------
+  ws.mergeCells("G2:G3");
 
-  // ---- Light borders for the table (A3:G21) ----
-  for (let row = 3; row <= 21; row++) {
-    for (const col of ["A", "B", "C", "D", "E", "F", "G"]) {
-      const cell = ws.getCell(`${col}${row}`);
-      cell.border = {
-        top: { style: "thin", color: { argb: "FFAAAAAA" } },
-        left: { style: "thin", color: { argb: "FFAAAAAA" } },
-        bottom: { style: "thin", color: { argb: "FFAAAAAA" } },
-        right: { style: "thin", color: { argb: "FFAAAAAA" } },
-      };
-    }
+  // ---------------------------------------------------------
+  // BORDERS for column G (header + body rows)
+  // Make G2–G21 look like the rest of the table.
+  // ---------------------------------------------------------
+  const TABLE_BORDER: any = {
+    top: { style: "thin", color: { argb: "FFBFBFBF" } },
+    left: { style: "thin", color: { argb: "FFBFBFBF" } },
+    bottom: { style: "thin", color: { argb: "FFBFBFBF" } },
+    right: { style: "thin", color: { argb: "FFBFBFBF" } },
+  };
+
+  for (let row = 2; row <= 21; row++) {
+    const cell = ws.getCell(`G${row}`) as any;
+    cell.border = TABLE_BORDER;
   }
 
-  // Freeze header row (row 3)
-  ws.views = [{ state: "frozen", xSplit: 0, ySplit: 3 }];
-
-  // ---- Generate file & download ----
+  // 3) Generate file & download
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
 
-  // Build cleaned, user-friendly file name
   const teacher = sanitizeFilePart(model.teacherName);
   const school = sanitizeFilePart(model.schoolName);
   const dateLabel = model.fileDate; // already "YYYY.MM.DD"
-
-  // Final filename: Teacher - School - YYYY.MM.DD.xlsx
   const filename = `${teacher} - ${school} - ${dateLabel}.xlsx`;
 
   saveAs(blob, filename);
-
-  // Header heights
-  ws.getRow(1).height = 60;
-  ws.getRow(2).height = 24;
-  ws.getRow(3).height = 28;
-
-  // Body rows
-  for (let r = 4; r <= 21; r++) {
-    ws.getRow(r).height = 110;
-  }
-
-  // Very long row (3.3 + 6.1 + 7.2)
-  ws.getRow(12).height = 140;
 }

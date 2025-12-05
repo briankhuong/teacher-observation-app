@@ -29,8 +29,6 @@ export function buildFileDateLabel(dateString?: string): string {
   return `${year}.${month}.${day}`; // 2025.11.27
 }
 
-
-
 interface TeacherLayoutEntry {
   indicatorNumber: string;   // must match .number in your app
   rowIndex: number;          // 4–21
@@ -194,7 +192,6 @@ const TEACHER_LAYOUT: TeacherLayoutEntry[] = [
   },
 ];
 
-
 // Support type is same as in your app
 export type SupportType = "Training" | "LVA" | "Visit";
 
@@ -227,7 +224,6 @@ export type TeacherArea =
   | "LEARNING_ENVIRONMENT"
   | "PREPARATION_AND_REFLECTION";
 
-
 /** Where each indicator should appear in the teacher sheet */
 export interface TeacherRowConfig {
   rowIndex: number; // Excel row number (4–21 in your template)
@@ -240,16 +236,15 @@ export interface TeacherExportRow {
   area: string;
   indicatorLabel: string;
   description: string;
-  checklist: string;
+  checklist: string; // now: "Good" | "Need some work" | "Not applicable"
   status: "Done" | "Pending" | "";
   strengths: string;
   growths: string;
 
-  // NEW: used only for preview UI
+  // used only for preview UI
   goodFlag?: boolean;
   growthFlag?: boolean;
 }
-
 
 export interface TeacherExportModel {
   sheetName: string;
@@ -262,14 +257,7 @@ export interface TeacherExportModel {
 
 /**
  * Mapping from indicator.number => Excel row + area.
- * 
- * IMPORTANT: You should adjust these rowIndex values to exactly
- * match your Indicator mapping.xlsx master file.
- *
- * Example only – replace with your REAL mapping later.
  */
-// IMPORTANT: this mapping assumes the indicators are exactly these numbers.
-// Adjust the rowIndex or add/remove entries if your indicator list changes.
 export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
   // LEARNING ENVIRONMENT (rows 4–6)
   "1.1": { rowIndex: 4, area: "LEARNING_ENVIRONMENT" },
@@ -294,7 +282,6 @@ export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
   "8.5": { rowIndex: 21, area: "PREPARATION_AND_REFLECTION" },
 };
 
-
 /**
  * Builds the Teacher Export model (no Excel yet) from an observation meta + indicators.
  */
@@ -314,25 +301,63 @@ export function buildTeacherExportModel(
     const good = src?.good ?? false;
     const growth = src?.growth ?? false;
     const anyMark = good || growth;
+    const comment = src?.commentText ?? "";
 
-    const checklist = good ? "✓" : "";
+    // 🔽 Teacher column D dropdown value
+    // - Good only        → "Good"
+    // - Growth only      → "Need some work"
+    // - Good + Growth    → "Good"  (follow Admin: this is "Rất tốt")
+    // - No mark          → "Not applicable"
+    let checklist: string;
+    if (!anyMark) {
+      checklist = "Not applicable";
+    } else if (good) {
+      checklist = "Good";
+    } else {
+      checklist = "Need some work";
+    }
+
+    // 🔽 Status used only in the preview UI
+    // - no mark        → ""
+    // - Growth only    → "Pending"
+    // - Good only      → "Done"
+    // - Good + Growth  → "Done" (overall very good)
     const status: "" | "Done" | "Pending" =
-      !anyMark ? "" : growth ? "Pending" : "Done";
+      !anyMark
+        ? ""
+        : good && !growth
+        ? "Done"
+        : !good && growth
+        ? "Pending"
+        : "Done"; // good && growth
 
-    const strengths = good ? src?.commentText ?? "" : "";
-    const growths = growth ? src?.commentText ?? "" : "";
+    // 🔽 Decide where the comment goes:
+    // - Good only        → Strengths
+    // - Growth only      → Growths
+    // - Good + Growth    → Strengths only (avoid duplicate text)
+    let strengths = "";
+    let growths = "";
+
+    if (good && !growth) {
+      strengths = comment;
+    } else if (!good && growth) {
+      growths = comment;
+    } else if (good && growth) {
+      // Admin: "Rất tốt" → treat as overall strength in Teacher export
+      strengths = comment;
+    }
 
     return {
       rowIndex: layout.rowIndex,
       area: layout.area,
       indicatorLabel: layout.indicatorLabel,
-      description: layout.excelDescription, // full long text
+      description: layout.excelDescription,
       checklist,
       status,
       strengths,
       growths,
 
-      // ⭐ NEW — show Good/Growth in preview
+      // For preview-only UI
       goodFlag: good,
       growthFlag: growth,
     };
@@ -354,10 +379,8 @@ export function buildTeacherExportModel(
     sheetName,
     headerBlock,
     rows,
-
     teacherName: meta.teacherName,
     schoolName: meta.schoolName,
     fileDate,
   };
 }
-

@@ -15,8 +15,12 @@ interface DashboardObservationRow {
   unit: string;
   lesson: string;
   supportType: "Training" | "LVA" | "Visit";
-  date: string; // formatted
-  rawDate: number | null; // numeric timestamp for sorting
+  /** Human-readable date for display (e.g. 12/4/2025) */
+  dateLabel: string;
+  /** Raw ISO date string stored in the observation meta (e.g. "2026-01-10") */
+  isoDate: string | null;
+  /** Numeric timestamp used for sorting/grouping */
+  rawDate: number | null;
   status: "draft" | "saved";
   progress: number;
   totalIndicators: number;
@@ -32,6 +36,8 @@ interface DashboardProps {
     unit: string;
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
+    /** Actual observation date from meta ("YYYY-MM-DD") */
+    date: string;
   }) => void;
 }
 
@@ -109,7 +115,6 @@ const SCHOOL_DIRECTORY: SchoolInfo[] = [
   { schoolName: "VSK", campus: "158 Võ Chí Công", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
   { schoolName: "VSK Sunshine", campus: "Cổ Nhuế", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
 ];
-
 
 function findSchoolInfo(
   schoolName: string,
@@ -251,8 +256,10 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         const obsDateStr: string | undefined = parsed.meta?.date;
         let rawDate: number | null = null;
         let displayDate = "";
+        let isoDate: string | null = null;
 
         if (obsDateStr) {
+          isoDate = obsDateStr;
           rawDate = safeParseTimestamp(obsDateStr);
           if (rawDate) {
             displayDate = new Date(rawDate).toLocaleDateString();
@@ -270,7 +277,8 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           unit: parsed.meta.unit,
           lesson: parsed.meta.lesson,
           supportType: parsed.meta.supportType,
-          date: displayDate,
+          dateLabel: displayDate,
+          isoDate,
           rawDate,
           status: parsed.status ?? "draft",
           progress,
@@ -422,91 +430,90 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   }, [observations, summaryMonth]);
 
   // Build summary rows when both month + AM are chosen
- // Build summary rows when both month + AM are chosen
-React.useEffect(() => {
-  if (!summaryMonth || !summaryAmKey) {
-    setSummaryRows([]);
-    return;
-  }
-
-  // key: teacher|school|campus
-  const rowMap = new Map<string, AmSummaryRow>();
-
-  observations.forEach((o) => {
-    const mk = monthKeyFromTs(o.rawDate);
-    if (mk !== summaryMonth) return;
-
-    const info = findSchoolInfo(o.schoolName, o.campus);
-    if (!info) return;
-    const amKey = amKeyFromSchool(info);
-    if (amKey !== summaryAmKey) return;
-
-    // load the full observation from storage so we can pull indicator notes
-    const storageKey = `${STORAGE_PREFIX}${o.id}`;
-    let details: any = null;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) details = JSON.parse(raw);
-    } catch (err) {
-      console.error("Failed to load full observation:", storageKey, err);
+  React.useEffect(() => {
+    if (!summaryMonth || !summaryAmKey) {
+      setSummaryRows([]);
+      return;
     }
 
-    const obsLabel = o.date || mk;
-    let collected = "";
+    // key: teacher|school|campus
+    const rowMap = new Map<string, AmSummaryRow>();
 
-    if (details && Array.isArray(details.indicators)) {
-      (details.indicators as any[]).forEach((ind) => {
-        const comment = (ind.commentText ?? "").toString().trim();
-        const hasComment = comment.length > 0;
+    observations.forEach((o) => {
+      const mk = monthKeyFromTs(o.rawDate);
+      if (mk !== summaryMonth) return;
 
-        // 🆕 Prefer explicit trainer-summary checkbox
-        const explicitlyFlagged =
-          ind.includeInTrainerSummary === true && hasComment;
+      const info = findSchoolInfo(o.schoolName, o.campus);
+      if (!info) return;
+      const amKey = amKeyFromSchool(info);
+      if (amKey !== summaryAmKey) return;
 
-        // 🧯 Fallback for old observations (no checkbox yet):
-        // use Growth + comment so you don't lose history.
-        const legacyFlagged =
-          ind.includeInTrainerSummary === undefined &&
-          !!ind.growth &&
-          hasComment;
+      // load the full observation from storage so we can pull indicator notes
+      const storageKey = `${STORAGE_PREFIX}${o.id}`;
+      let details: any = null;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) details = JSON.parse(raw);
+      } catch (err) {
+        console.error("Failed to load full observation:", storageKey, err);
+      }
 
-        if (!explicitlyFlagged && !legacyFlagged) return;
+      const obsLabel = o.dateLabel || mk;
+      let collected = "";
 
-        const number = ind.number ?? "";
-        const line = `- [${obsLabel}] ${number}: ${comment}`;
-        collected += (collected ? "\n" : "") + line;
-      });
-    }
+      if (details && Array.isArray(details.indicators)) {
+        (details.indicators as any[]).forEach((ind) => {
+          const comment = (ind.commentText ?? "").toString().trim();
+          const hasComment = comment.length > 0;
 
-    const key = `${o.teacherName}|${o.schoolName}|${o.campus}`;
+          // 🆕 Prefer explicit trainer-summary checkbox
+          const explicitlyFlagged =
+            ind.includeInTrainerSummary === true && hasComment;
 
-    if (!rowMap.has(key)) {
-      rowMap.set(key, {
-        schoolName: o.schoolName,
-        campus: o.campus,
-        teacherName: o.teacherName,
-        status: "none",
-        nextSteps: collected,
-      });
-    } else {
-      const existing = rowMap.get(key)!;
-      const appended = collected
-        ? [existing.nextSteps, collected].filter(Boolean).join("\n")
-        : existing.nextSteps;
-      rowMap.set(key, {
-        ...existing,
-        nextSteps: appended,
-      });
-    }
-  });
+          // 🧯 Fallback for old observations (no checkbox yet):
+          // use Growth + comment so you don't lose history.
+          const legacyFlagged =
+            ind.includeInTrainerSummary === undefined &&
+            !!ind.growth &&
+            hasComment;
 
-  const rows = Array.from(rowMap.values()).sort((a, b) =>
-    a.teacherName.localeCompare(b.teacherName)
-  );
+          if (!explicitlyFlagged && !legacyFlagged) return;
 
-  setSummaryRows(rows);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [summaryMonth, summaryAmKey, observations]);
+          const number = ind.number ?? "";
+          const line = `- [${obsLabel}] ${number}: ${comment}`;
+          collected += (collected ? "\n" : "") + line;
+        });
+      }
+
+      const key = `${o.teacherName}|${o.schoolName}|${o.campus}`;
+
+      if (!rowMap.has(key)) {
+        rowMap.set(key, {
+          schoolName: o.schoolName,
+          campus: o.campus,
+          teacherName: o.teacherName,
+          status: "none",
+          nextSteps: collected,
+        });
+      } else {
+        const existing = rowMap.get(key)!;
+        const appended = collected
+          ? [existing.nextSteps, collected].filter(Boolean).join("\n")
+          : existing.nextSteps;
+        rowMap.set(key, {
+          ...existing,
+          nextSteps: appended,
+        });
+      }
+    });
+
+    const rows = Array.from(rowMap.values()).sort((a, b) =>
+      a.teacherName.localeCompare(b.teacherName)
+    );
+
+    setSummaryRows(rows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summaryMonth, summaryAmKey, observations]);
 
   // Build email body from current table state
   const emailBody = React.useMemo(() => {
@@ -593,6 +600,8 @@ React.useEffect(() => {
           unit: obs.unit,
           lesson: obs.lesson,
           supportType: obs.supportType,
+          // pass through stored ISO date (or empty string if missing for old data)
+          date: obs.isoDate || "",
         })
       }
     >
@@ -622,7 +631,7 @@ React.useEffect(() => {
           </span>
         </div>
       </div>
-      <div className="obs-date">{obs.date}</div>
+      <div className="obs-date">{obs.dateLabel}</div>
     </button>
   );
 
