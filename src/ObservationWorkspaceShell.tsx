@@ -4,6 +4,10 @@ import React, { useEffect, useRef,useState } from "react";
 import { exportAdminExcel } from "./exportAdminExcel"; // ← NEW
 //import { buildAdminExportModel, type AdminExportModel } from "./exportAdminModel";
 
+import {
+  loadObservationFromDb,
+  saveObservationToDb,
+} from "./db/observations";
 
 import type {
   ObservationMetaForExport,
@@ -494,85 +498,164 @@ export const ObservationWorkspaceShell: React.FC<
 
     // Load from localStorage when opening this observation
   useEffect(() => {
+  let cancelled = false;
+
+  async function load() {
+    // 1️⃣ Try localStorage first (fast / offline)
     try {
       const raw = localStorage.getItem(storageKey);
-      if (!raw) {
-        // nothing saved yet – start fresh
-        setIndicators(INITIAL_INDICATORS);
-        setSaveStatus("idle");
-        setLastSavedAt(null);
-        return;
-      }
-
-      const parsed: SavedObservationPayload = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.indicators)) {
-        setIndicators(parsed.indicators);
-        setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
-        setLastSavedAt(parsed.updatedAt ?? null);
-        setScratchpadText(parsed.scratchpadText ?? ""); // 🆕
+      if (raw) {
+        const parsed: SavedObservationPayload = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.indicators)) {
+          if (cancelled) return;
+          setIndicators(parsed.indicators);
+          setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
+          setLastSavedAt(parsed.updatedAt ?? null);
+          setScratchpadText(parsed.scratchpadText ?? "");
+          return; // ✅ done, no need to hit Supabase
+        }
       }
     } catch (err) {
       console.error("Failed to load observation from storage", err);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey]);
 
-    // Auto-save to localStorage (as draft) with debounce
-  useEffect(() => {
-    if (!observationMeta.id) return;
+    // 2️⃣ Nothing in localStorage → load from Supabase
+    try {
+      const row = await loadObservationFromDb(observationMeta.id);
 
-    // Cancel any pending save
+      if (cancelled) return;
+
+      const metaFromDb = (row.meta ?? {}) as any;
+
+      const payload: SavedObservationPayload = {
+        id: row.id,
+        meta: {
+          teacherName:
+            metaFromDb.teacherName ?? observationMeta.teacherName,
+          schoolName:
+            metaFromDb.schoolName ?? observationMeta.schoolName,
+          campus: metaFromDb.campus ?? observationMeta.campus,
+          unit: metaFromDb.unit ?? observationMeta.unit,
+          lesson: metaFromDb.lesson ?? observationMeta.lesson,
+          supportType:
+            metaFromDb.supportType ?? observationMeta.supportType,
+          date: metaFromDb.date ?? observationMeta.date,
+        },
+        indicators: (row.indicators ?? []) as any[],
+        status: row.status ?? "draft",
+        updatedAt: Date.now(),
+        scratchpadText: "", // we don't store this in DB (yet)
+      };
+
+      // cache for next time
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(payload));
+      } catch (err) {
+        console.error("Failed to cache observation to localStorage", err);
+      }
+
+      setIndicators(payload.indicators);
+      setSaveStatus(payload.status === "saved" ? "saved" : "idle");
+      setLastSavedAt(payload.updatedAt);
+      setScratchpadText(payload.scratchpadText ?? "");
+    } catch (err) {
+      console.error("[Workspace] Could not load observation from DB", err);
+
+      if (!cancelled) {
+        // fall back to fresh blank observation
+        setIndicators(INITIAL_INDICATORS);
+        setSaveStatus("idle");
+        setLastSavedAt(null);
+        setScratchpadText("");
+      }
+    }
+  }
+
+  load();
+  return () => {
+    cancelled = true;
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [storageKey, observationMeta.id]);
+
+const persistObservation = React.useCallback(
+  async (payload: SavedObservationPayload) => {
+    // 1️⃣ Local cache
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(payload));
+    } catch (err) {
+      console.error("Failed to write observation to localStorage", err);
+    }
+
+    // 2️⃣ Supabase sync
+    try {
+      await saveObservationToDb({
+        id: payload.id,
+        status: payload.status,
+        meta: payload.meta,
+        indicators: payload.indicators,
+      });
+    } catch (err) {
+      console.error(
+        "[Workspace] Failed to sync observation to Supabase",
+        err
+      );
+    }
+  },
+  [storageKey]
+);
+
+   useEffect(() => {
+  if (!observationMeta.id) return;
+
+  // Cancel any pending save
+  if (saveTimeoutRef.current) {
+    window.clearTimeout(saveTimeoutRef.current);
+  }
+
+  // Debounce: save ~800ms after the last change
+  saveTimeoutRef.current = window.setTimeout(() => {
+    const payload: SavedObservationPayload = {
+      id: observationMeta.id,
+      meta: {
+        teacherName,
+        schoolName,
+        campus,
+        unit,
+        lesson,
+        supportType,
+        date,
+      },
+      indicators,
+      status: "draft",
+      updatedAt: Date.now(),
+      scratchpadText,
+    };
+
+    persistObservation(payload);
+    setLastSavedAt(payload.updatedAt);
+    setCanvasDirty(false); // auto-save completed, ink is saved
+  }, 800);
+
+  return () => {
     if (saveTimeoutRef.current) {
       window.clearTimeout(saveTimeoutRef.current);
     }
-
-    // Debounce: save ~800ms after the last change
-    saveTimeoutRef.current = window.setTimeout(() => {
-      try {
-        const payload: SavedObservationPayload = {
-          id: observationMeta.id,
-          meta: {
-            teacherName,
-            schoolName,
-            campus,
-            unit,
-            lesson,
-            supportType,
-            date
-          },
-          indicators,
-          status: "draft",
-          updatedAt: Date.now(),
-          scratchpadText,
-        };
-        localStorage.setItem(storageKey, JSON.stringify(payload));
-        setLastSavedAt(payload.updatedAt);
-        setCanvasDirty(false);   // auto-save completed, ink is saved   
-
-      } catch (err) {
-        console.error("Auto-save failed", err);
-      }
-    }, 800);
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        window.clearTimeout(saveTimeoutRef.current);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    indicators,
-    scratchpadText,   
-    observationMeta.id,
-    teacherName,
-    schoolName,
-    campus,
-    unit,
-    lesson,
-    supportType,
-  ]);
-
-
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [
+  indicators,
+  scratchpadText,
+  observationMeta.id,
+  teacherName,
+  schoolName,
+  campus,
+  unit,
+  lesson,
+  supportType,
+]);
+  
   // How many indicators have any value (good/growth/comment/strokes)
     const progressCount = indicators.filter((ind) => {
     const hasMark = ind.good || ind.growth;

@@ -6,21 +6,9 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
-import { createClient, type Session, type User } from "@supabase/supabase-js";
 
-// ----------------------------
-// Supabase client
-// ----------------------------
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL!;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
-  },
-});
+import type { Session, User } from "@supabase/supabase-js";
+import { supabase } from "../supabaseClient";   // <-- USE THE SHARED CLIENT
 
 // ----------------------------
 // Context types

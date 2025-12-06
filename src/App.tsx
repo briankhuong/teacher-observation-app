@@ -3,12 +3,18 @@ import React, { useState } from "react";
 import { DashboardShell } from "./DashboardShell";
 import { SCHOOL_MASTER_LIST } from "./schoolMaster";
 import { ObservationWorkspaceShell } from "./ObservationWorkspaceShell";
+import { TeachersScreen } from "./TeachersScreen";
+import { SchoolsScreen } from "./SchoolsScreen";
 import { useAuth } from "./auth/AuthContext";
+import { supabase } from "./supabaseClient";
 
-type Screen = "dashboard" | "workspace";
+type Screen = "dashboard" | "workspace" | "teachers" | "schools";
 type SupportType = "Training" | "LVA" | "Visit";
 
 interface NewObservationMeta {
+  // Supabase-generated id of the observation (we’ll fill this in from the DB)
+  observationId?: string;
+
   teacherName: string;
   schoolName: string;
   campus: string;
@@ -22,37 +28,38 @@ interface SelectedObservationMeta extends NewObservationMeta {
   id: string;
 }
 
-// Temporary demo observation (can delete later)
-const MOCK_OBS: SelectedObservationMeta = {
-  id: "demo-1",
-  teacherName: "Daisy Nguyen",
-  schoolName: "VSK Sunshine",
-  campus: "Campus A",
-  unit: "3",
-  lesson: "2",
-  supportType: "LVA",
-  date: new Date().toISOString().slice(0, 10),
-};
-
 const App: React.FC = () => {
-  const { user, signOut } = useAuth(); // 🆕 Supabase auth
+  const { user, signOut } = useAuth();
   const [showNewObservationForm, setShowNewObservationForm] = useState(false);
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [selectedObservation, setSelectedObservation] =
-    useState<SelectedObservationMeta | null>(MOCK_OBS);
+    useState<SelectedObservationMeta | null>(null);
 
   const goToDashboard = () => setScreen("dashboard");
+  const goToTeachers = () => setScreen("teachers");
+  const goToSchools = () => setScreen("schools");
 
-  const handleCreateObservationFromForm = (meta: NewObservationMeta) => {
-    const id = `obs-${Date.now()}`;
-    const fullMeta: SelectedObservationMeta = { id, ...meta };
-    setSelectedObservation(fullMeta);
-    setShowNewObservationForm(false);
-    setScreen("workspace");
+  console.log("debug user:", user?.id);
+
+ const handleCreateObservationFromForm = (
+  meta: NewObservationMeta & { id?: string; observationId?: string }
+) => {
+  // Prefer the real Supabase id, fallback to timestamp
+  const id = meta.id ?? meta.observationId ?? `obs-${Date.now()}`;
+
+  // ⬇️ ADD THIS DEBUG LINE
+  console.log("[DEBUG] Opening observation:", id, meta);
+
+  const fullMeta: SelectedObservationMeta = {
+    id,
+    ...meta,
   };
 
-  // Called when user clicks a card in the Dashboard
-  // Dashboard may or may not send a date yet → fallback to today
+  setSelectedObservation(fullMeta);
+  setShowNewObservationForm(false);
+  setScreen("workspace");
+};
+
   const openObservation = (obs: any) => {
     const withDate: SelectedObservationMeta = {
       id: obs.id,
@@ -75,27 +82,32 @@ const App: React.FC = () => {
           <div className="app-title">WebNotes • Teacher Observation</div>
           <span className="tag-pill">iPad • Pencil • Excel export</span>
         </div>
+
         <div className="top-bar-right">
-          <span className="badge">
-            Trainer: {user?.email ?? "Unknown user"}
-          </span>
+          <span className="badge">Trainer: Brian</span>
+
           <button className="btn-ghost" onClick={goToDashboard}>
             Dashboard
           </button>
+
+          <button className="btn-ghost" onClick={goToTeachers}>
+            Teachers
+          </button>
+
+          <button className="btn-ghost" onClick={goToSchools}>
+            Schools
+          </button>
+
+          <button className="btn-ghost" type="button" onClick={signOut}>
+            Sign out
+          </button>
+
           <button
             className="btn btn-primary"
             type="button"
             onClick={() => setShowNewObservationForm(true)}
           >
             New Observation
-          </button>
-          <button
-            className="btn-ghost"
-            type="button"
-            onClick={signOut}
-            style={{ marginLeft: 8 }}
-          >
-            Sign out
           </button>
         </div>
       </header>
@@ -111,12 +123,20 @@ const App: React.FC = () => {
             onBack={goToDashboard}
           />
         )}
+
+        {screen === "teachers" && <TeachersScreen />}
+        {screen === "schools" && <SchoolsScreen />}
       </main>
 
       {showNewObservationForm && (
         <NewObservationForm
           onCancel={() => setShowNewObservationForm(false)}
           onCreate={handleCreateObservationFromForm}
+          onRequestSchoolsScreen={() => {
+            // close modal and jump to Schools tab when user chooses "Add new school…"
+            setShowNewObservationForm(false);
+            setScreen("schools");
+          }}
         />
       )}
     </div>
@@ -124,15 +144,43 @@ const App: React.FC = () => {
 };
 
 interface NewObservationFormProps {
-  onCreate: (meta: NewObservationMeta) => void;
+  onCreate: (meta: NewObservationMeta & { id: string }) => void;
   onCancel: () => void;
+  onRequestSchoolsScreen: () => void;
 }
+
+interface TeacherOption {
+  id: string;
+  name: string;
+  email: string | null;
+  school_name: string;
+  campus: string;
+  worksheet_url: string | null;
+}
+
+interface SchoolRow {
+  id: string;
+  trainer_id: string;
+  school_name: string;
+  campus_name: string;
+  am_name: string | null;
+  am_email: string | null;
+  admin_name: string | null;
+  admin_email: string | null;
+  admin_phone: string | null;
+  address_line1: string | null;
+  city: string | null;
+}
+
+const ADD_NEW_SCHOOL_VALUE = "__ADD_NEW_SCHOOL__";
 
 const NewObservationForm: React.FC<NewObservationFormProps> = ({
   onCreate,
   onCancel,
+  onRequestSchoolsScreen,
 }) => {
   const todayISO = new Date().toISOString().slice(0, 10);
+  const { user } = useAuth();
 
   const [teacherName, setTeacherName] = useState("");
   const [schoolName, setSchoolName] = useState("");
@@ -142,39 +190,244 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const [supportType, setSupportType] = useState<SupportType>("Visit");
   const [date, setDate] = useState<string>(todayISO);
 
-  // Unique school list
-  const schoolOptions = React.useMemo(
-    () =>
-      Array.from(new Set(SCHOOL_MASTER_LIST.map((s) => s.schoolName))).sort(),
-    []
-  );
+  const [worksheetUrl, setWorksheetUrl] = useState("");
 
-  // Campus options filtered by selected school
-  const campusOptions = React.useMemo(
-    () =>
-      SCHOOL_MASTER_LIST.filter((s) => s.schoolName === schoolName)
-        .map((s) => s.campusName)
-        .filter((v, i, arr) => arr.indexOf(v) === i),
-    [schoolName]
-  );
+  const [teachers, setTeachers] = useState<TeacherOption[]>([]);
+  const [teachersLoading, setTeachersLoading] = useState(true);
+  const [teachersError, setTeachersError] = useState<string | null>(null);
+  const [selectedTeacherId, setSelectedTeacherId] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!teacherName || !schoolName || !campus || !unit || !lesson || !date) {
-      alert("Please fill teacher, school, campus, unit, lesson, and date.");
-      return;
+  const [schools, setSchools] = useState<SchoolRow[]>([]);
+  const [schoolsLoading, setSchoolsLoading] = useState(true);
+  const [schoolsError, setSchoolsError] = useState<string | null>(null);
+
+  // ----- Load teachers -----
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadTeachers() {
+      try {
+        setTeachersLoading(true);
+        setTeachersError(null);
+
+        const { data, error } = await supabase
+          .from("teachers")
+          .select("id, name, email, school_name, campus, worksheet_url")
+          .order("name", { ascending: true });
+
+        if (error) {
+          console.error("[DB] load teachers error", error);
+          if (!cancelled) setTeachersError(error.message);
+          return;
+        }
+
+        if (!cancelled && data) {
+          setTeachers(data as TeacherOption[]);
+        }
+      } finally {
+        if (!cancelled) setTeachersLoading(false);
+      }
     }
 
-    onCreate({
-      teacherName,
-      schoolName,
-      campus,
-      unit,
-      lesson,
-      supportType,
-      date,
-    });
+    loadTeachers();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ----- Load schools for this trainer -----
+  React.useEffect(() => {
+    if (!user) return;
+    const currentUser = user;
+
+    let cancelled = false;
+
+    async function loadSchools() {
+      try {
+        setSchoolsLoading(true);
+        setSchoolsError(null);
+
+        const { data, error } = await supabase
+        .from("schools")
+        .select("id, trainer_id, school_name, campus_name")
+        .eq("trainer_id", currentUser.id)
+        .order("school_name", { ascending: true })
+        .order("campus_name", { ascending: true });
+
+        if (error) {
+          console.error("[DB] load schools error", error);
+          if (!cancelled) setSchoolsError(error.message);
+          return;
+        }
+
+        if (!cancelled && data) {
+          setSchools(data as SchoolRow[]);
+        }
+      } finally {
+        if (!cancelled) setSchoolsLoading(false);
+      }
+    }
+
+    loadSchools();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // ----- Options for School & Campus -----
+  const schoolOptions = React.useMemo(() => {
+    const names = (schools.length
+      ? schools.map((s) => s.school_name)
+      : SCHOOL_MASTER_LIST.map((s) => s.schoolName)
+    ).filter(Boolean);
+
+    return Array.from(new Set(names)).sort();
+  }, [schools]);
+
+  const campusOptions = React.useMemo(() => {
+    if (!schoolName) return [];
+
+    if (schools.length) {
+      const campuses = schools
+        .filter((s) => s.school_name === schoolName)
+        .map((s) => s.campus_name)
+        .filter(Boolean);
+
+      return Array.from(new Set(campuses));
+    }
+
+    return SCHOOL_MASTER_LIST.filter((s) => s.schoolName === schoolName)
+      .map((s) => s.campusName)
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+  }, [schoolName, schools]);
+
+  const handleSelectTeacher = (id: string) => {
+    setSelectedTeacherId(id);
+    if (!id) return;
+
+    const t = teachers.find((x) => x.id === id);
+    if (!t) return;
+
+    setTeacherName(t.name);
+    setSchoolName(t.school_name);
+    setCampus(t.campus);
+    setWorksheetUrl(t.worksheet_url ?? "");
   };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (!teacherName || !schoolName || !campus || !unit || !lesson || !date) {
+    alert("Please fill teacher, school, campus, unit, lesson, and date.");
+    return;
+  }
+
+  if (!user) {
+    alert("Missing user session – please sign out and sign in again.");
+    return;
+  }
+
+  let teacherId = selectedTeacherId;
+
+  // 1) If no teacher selected from dropdown, create one in Supabase
+  if (!teacherId) {
+    try {
+      const cleanUrl = worksheetUrl.trim() || null;
+
+      const { data, error } = await supabase
+        .from("teachers")
+        .insert({
+          trainer_id: user.id,
+          name: teacherName.trim(),
+          email: null,
+          school_name: schoolName,
+          campus,
+          worksheet_url: cleanUrl,
+        })
+        .select("id, worksheet_url")
+        .single();
+
+      if (error || !data) {
+        console.error("[DB] create teacher from observation error", error);
+        alert("Could not create teacher in the database.");
+        return;
+      }
+
+      teacherId = data.id;
+
+      // keep local list updated for next time
+      setTeachers((prev) => [
+        ...prev,
+        {
+          id: data.id,
+          name: teacherName.trim(),
+          email: null,
+          school_name: schoolName,
+          campus,
+          worksheet_url: data.worksheet_url ?? null,
+        },
+      ]);
+      setSelectedTeacherId(data.id);
+      setWorksheetUrl(data.worksheet_url ?? "");
+    } catch (err) {
+      console.error("[DB] unexpected error creating teacher", err);
+      alert("Unexpected error creating teacher.");
+      return;
+    }
+  }
+
+  if (!teacherId) {
+    // This should basically never happen now
+    alert("Could not determine teacher record. Please try again.");
+    return;
+  }
+
+  // 2) Insert observation row
+  const metaPayload = {
+    teacherName,
+    schoolName,
+    campus,
+    unit,
+    lesson,
+    supportType,
+    date,
+  };
+
+  const { data: obs, error: obsError } = await supabase
+    .from("observations")
+    .insert({
+      trainer_id: user.id,
+      teacher_id: teacherId,
+      status: "draft",
+      meta: metaPayload,
+      indicators: {},          // placeholder, workspace will update later
+      observation_date: date,
+    })
+    .select("id")
+    .single();
+
+  if (obsError || !obs) {
+    console.error("[DB] create observation error", obsError);
+    alert(
+      `Could not save observation: ${
+        obsError ? obsError.message : "Unknown error"
+      }`
+    );
+    return;
+  }
+
+  // 3) Open this observation in the workspace
+  onCreate({
+    id: obs.id,               // <-- use Supabase ID as the observation id
+    teacherName,
+    schoolName,
+    campus,
+    unit,
+    lesson,
+    supportType,
+    date,
+  });
+};
 
   return (
     <div className="modal-backdrop">
@@ -187,6 +440,37 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         </div>
 
         <form className="modal-body" onSubmit={handleSubmit}>
+          {/* Existing teacher picker */}
+          <div className="form-row">
+            <label>Existing teacher (optional)</label>
+            <select
+              className="select"
+              value={selectedTeacherId}
+              onChange={(e) => handleSelectTeacher(e.target.value)}
+              disabled={teachersLoading || !!teachersError}
+            >
+              <option value="">
+                {teachersLoading
+                  ? "Loading teachers…"
+                  : "Select teacher from your list…"}
+              </option>
+              {teachers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} — {t.school_name} ({t.campus})
+                </option>
+              ))}
+            </select>
+            {teachersError && (
+              <div className="field-error">
+                Could not load teachers ({teachersError}). You can still type a
+                new teacher below.
+              </div>
+            )}
+            <div className="hint">
+              Pick an existing teacher, or leave this blank and type a new one.
+            </div>
+          </div>
+
           <div className="form-row">
             <label>Teacher name</label>
             <input
@@ -198,22 +482,51 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
           </div>
 
           <div className="form-row">
+            <label>Worksheet link (optional)</label>
+            <input
+              className="input"
+              type="url"
+              value={worksheetUrl}
+              onChange={(e) => setWorksheetUrl(e.target.value)}
+              placeholder="Paste Excel / OneDrive link for this teacher…"
+            />
+            <div className="hint">
+              Saved into the teacher record if a new teacher is created.
+            </div>
+          </div>
+
+          {/* School / campus driven by Supabase schools, plus "Add new school…" */}
+          <div className="form-row">
             <label>School</label>
             <select
               className="select"
               value={schoolName}
               onChange={(e) => {
-                setSchoolName(e.target.value);
+                const value = e.target.value;
+                if (value === ADD_NEW_SCHOOL_VALUE) {
+                  onRequestSchoolsScreen();
+                  return;
+                }
+                setSchoolName(value);
                 setCampus("");
               }}
             >
-              <option value="">Select school…</option>
+              <option value="">
+                {schoolsLoading ? "Loading schools…" : "Select school…"}
+              </option>
               {schoolOptions.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
               ))}
+              <option value={ADD_NEW_SCHOOL_VALUE}>➕ Add new school…</option>
             </select>
+            {schoolsError && (
+              <div className="field-error">
+                Could not load schools ({schoolsError}). Falling back to the
+                built-in list.
+              </div>
+            )}
           </div>
 
           <div className="form-row">

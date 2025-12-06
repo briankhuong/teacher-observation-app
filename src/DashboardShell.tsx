@@ -1,4 +1,7 @@
+// src/DashboardShell.tsx
 import React, { useState } from "react";
+import { useAuth } from "./auth/AuthContext";
+import { supabase } from "./supabaseClient";
 
 const STORAGE_PREFIX = "obs-v1-";
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
@@ -201,6 +204,8 @@ function groupBy<T>(
 export const DashboardShell: React.FC<DashboardProps> = ({
   onOpenObservation,
 }) => {
+  const { user } = useAuth();
+
   const [observations, setObservations] = useState<DashboardObservationRow[]>(
     []
   );
@@ -220,91 +225,139 @@ export const DashboardShell: React.FC<DashboardProps> = ({
      LOAD OBSERVATIONS + SUMMARY META
   --------------------------------- */
   React.useEffect(() => {
-    const rows: DashboardObservationRow[] = [];
+    if (!user) {
+      setObservations([]);
+      return;
+    }
 
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith(STORAGE_PREFIX)) continue;
+    const load = async () => {
+      const rows: DashboardObservationRow[] = [];
 
       try {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
+        // 1) Load observations from Supabase for this trainer
+        const { data, error } = await supabase
+          .from("observations")
+          .select(
+            "id, status, meta, indicators, created_at, updated_at, observation_date"
+          )
+          .eq("trainer_id", user.id)
+          .order("observation_date", { ascending: false })
+          .order("created_at", { ascending: false });
 
-        const parsed = JSON.parse(raw);
-
-        const total = parsed.indicators?.length ?? 0;
-
-        let good = 0;
-        let growth = 0;
-        let progress = 0;
-
-        (parsed.indicators ?? []).forEach((ind: any) => {
-          const hasMark = ind.good || ind.growth;
-          const hasComment = ind.commentText?.trim().length > 0;
-          const hasInk =
-            Array.isArray(ind.strokes) && ind.strokes.length > 0;
-
-          if (hasMark || hasComment || hasInk) progress++;
-          if (ind.good) good++;
-          if (ind.growth) growth++;
-        });
-
-        let statusColor: StatusColor = "mixed";
-        if (growth > 0 && good === 0) statusColor = "growth";
-        else if (good > 0 && growth === 0) statusColor = "good";
-
-        const obsDateStr: string | undefined = parsed.meta?.date;
-        let rawDate: number | null = null;
-        let displayDate = "";
-        let isoDate: string | null = null;
-
-        if (obsDateStr) {
-          isoDate = obsDateStr;
-          rawDate = safeParseTimestamp(obsDateStr);
-          if (rawDate) {
-            displayDate = new Date(rawDate).toLocaleDateString();
-          }
-        } else if (parsed.updatedAt) {
-          rawDate = parsed.updatedAt;
-          displayDate = new Date(parsed.updatedAt).toLocaleDateString();
+        if (error) {
+          console.error("[DB] load observations error", error);
         }
 
-        rows.push({
-          id: parsed.id,
-          teacherName: parsed.meta.teacherName,
-          schoolName: parsed.meta.schoolName,
-          campus: parsed.meta.campus,
-          unit: parsed.meta.unit,
-          lesson: parsed.meta.lesson,
-          supportType: parsed.meta.supportType,
-          dateLabel: displayDate,
-          isoDate,
-          rawDate,
-          status: parsed.status ?? "draft",
-          progress,
-          totalIndicators: total,
-          statusColor,
+        (data ?? []).forEach((dbRow: any) => {
+          // Prefer full data from localStorage (workspace), fallback to DB meta
+          const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
+          let parsed: any = null;
+
+          try {
+            const rawLocal = localStorage.getItem(storageKey);
+            if (rawLocal) {
+              parsed = JSON.parse(rawLocal);
+            }
+          } catch (err) {
+            console.error(
+              "Error parsing stored observation from localStorage:",
+              storageKey,
+              err
+            );
+          }
+
+          if (!parsed) {
+            parsed = {
+              id: dbRow.id,
+              meta: dbRow.meta ?? {},
+              indicators: dbRow.indicators ?? [],
+              status: dbRow.status ?? "draft",
+              updatedAt: dbRow.updated_at
+                ? new Date(dbRow.updated_at).getTime()
+                : dbRow.created_at
+                ? new Date(dbRow.created_at).getTime()
+                : Date.now(),
+            };
+          }
+
+          const total = parsed.indicators?.length ?? 0;
+
+          let good = 0;
+          let growth = 0;
+          let progress = 0;
+
+          (parsed.indicators ?? []).forEach((ind: any) => {
+            const hasMark = ind.good || ind.growth;
+            const hasComment = ind.commentText?.trim().length > 0;
+            const hasInk =
+              Array.isArray(ind.strokes) && ind.strokes.length > 0;
+
+            if (hasMark || hasComment || hasInk) progress++;
+            if (ind.good) good++;
+            if (ind.growth) growth++;
+          });
+
+          let statusColor: StatusColor = "mixed";
+          if (growth > 0 && good === 0) statusColor = "growth";
+          else if (good > 0 && growth === 0) statusColor = "good";
+
+          const obsDateStr: string | undefined =
+            parsed.meta?.date ?? dbRow.observation_date ?? undefined;
+
+          let rawDate: number | null = null;
+          let displayDate = "";
+          let isoDate: string | null = null;
+
+          if (obsDateStr) {
+            isoDate = obsDateStr;
+            rawDate = safeParseTimestamp(obsDateStr);
+            if (rawDate) {
+              displayDate = new Date(rawDate).toLocaleDateString();
+            }
+          } else if (parsed.updatedAt) {
+            rawDate = parsed.updatedAt;
+            displayDate = new Date(parsed.updatedAt).toLocaleDateString();
+          }
+
+          rows.push({
+            id: parsed.id,
+            teacherName: parsed.meta.teacherName,
+            schoolName: parsed.meta.schoolName,
+            campus: parsed.meta.campus,
+            unit: parsed.meta.unit,
+            lesson: parsed.meta.lesson,
+            supportType: parsed.meta.supportType,
+            dateLabel: displayDate,
+            isoDate,
+            rawDate,
+            status: parsed.status ?? "draft",
+            progress,
+            totalIndicators: total,
+            statusColor,
+          });
         });
       } catch (err) {
-        console.error("Error parsing stored observation:", key, err);
+        console.error("[Dashboard] unexpected error loading observations", err);
       }
-    }
 
-    setObservations(rows);
+      setObservations(rows);
 
-    // Load AM summary "sent" markers
-    try {
-      const raw = localStorage.getItem(SUMMARY_STATE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") {
-          setAmSummarySentMap(parsed as AmSummarySentMap);
+      // Load AM summary "sent" markers (unchanged)
+      try {
+        const raw = localStorage.getItem(SUMMARY_STATE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            setAmSummarySentMap(parsed as AmSummarySentMap);
+          }
         }
+      } catch (err) {
+        console.error("Failed to load AM summary state", err);
       }
-    } catch (err) {
-      console.error("Failed to load AM summary state", err);
-    }
-  }, []);
+    };
+
+    load();
+  }, [user]);
 
   /* ------------------------------
      FILTER + SORT + GROUP
