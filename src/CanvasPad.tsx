@@ -16,9 +16,14 @@ export interface Stroke {
 interface CanvasPadProps {
   strokes: Stroke[];
   onChange: (strokes: Stroke[]) => void;
+  readOnly?: boolean; // 🔒 when true, no drawing/editing
 }
 
-export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
+export const CanvasPad: React.FC<CanvasPadProps> = ({
+  strokes,
+  onChange,
+  readOnly = false,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -41,7 +46,6 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
     currentStrokeRef.current = currentStroke;
   }, [currentStroke]);
 
-
   // Keep local strokes in sync when prop changes (e.g. switch indicator)
   useEffect(() => {
     setLocalStrokes(strokes);
@@ -49,7 +53,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   }, [strokes]);
 
   // Resize canvas to match container
-      useEffect(() => {
+  useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
@@ -99,6 +103,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   // ---- Shared helpers ----
 
   const beginStrokeAt = (x: number, y: number) => {
+    if (readOnly) return; // 🔒
     const stroke: Stroke = {
       color: mode === "pen" ? color : "#020617", // dark bg as eraser
       size: mode === "pen" ? size : size * 2,
@@ -110,6 +115,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const extendStrokeTo = (x: number, y: number) => {
+    if (readOnly) return; // 🔒
     if (!isDrawing || !currentStroke) return;
     const updated: Stroke = {
       ...currentStroke,
@@ -119,6 +125,12 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const finishStroke = () => {
+    if (readOnly) {
+      setIsDrawing(false);
+      setCurrentStroke(null);
+      return;
+    }
+
     if (!isDrawing || !currentStroke) {
       setIsDrawing(false);
       return;
@@ -132,20 +144,22 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   // Small helper to check if a touch is from Apple Pencil
-  const isStylusTouch = (touch: Touch): boolean => {
-    const anyTouch = touch as any;
-    // On modern iOS Safari, touchType is "stylus" for Pencil
-    if (typeof anyTouch.touchType === "string") {
-      return anyTouch.touchType === "stylus";
-    }
-    // If touchType is missing (older devices), fall back to allowing it.
-    // But since Pencil already works for you, touchType should be present.
-    return true;
-  };
+  // Small helper to check if a touch is from Apple Pencil
+const isStylusTouch = (touch: any): boolean => {
+  const anyTouch = touch as any;
+  // On modern iOS Safari, touchType is "stylus" for Pencil
+  if (typeof anyTouch.touchType === "string") {
+    return anyTouch.touchType === "stylus";
+  }
+  // If touchType is missing (older devices), fall back to allowing it.
+  return true;
+};
+
 
   // ---- Mouse handlers (for desktop testing only) ----
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (readOnly) return; // 🔒
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -153,6 +167,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (readOnly) return; // 🔒
     if (!isDrawing) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -161,28 +176,30 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const handleMouseUp = () => {
+    if (readOnly) return; // 🔒
     finishStroke();
   };
 
   const handleMouseLeave = () => {
+    if (readOnly) return; // 🔒
     finishStroke();
   };
 
   // ---- Touch handlers (for iPad / Pencil) ----
 
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (readOnly) return; // 🔒
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const touch = e.touches[0];
     if (!touch) return;
 
-    // Ignore finger touches; only respond to stylus
     if (!isStylusTouch(touch)) {
       return;
     }
 
-    e.preventDefault(); // stop scroll/zoom
+    e.preventDefault();
 
     const rect = canvas.getBoundingClientRect();
     const x = touch.clientX - rect.left;
@@ -191,6 +208,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (readOnly) return; // 🔒
     if (!isDrawing) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -198,13 +216,11 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
     const touch = e.touches[0];
     if (!touch) return;
 
-    // If this is not stylus, ignore (shouldn't happen mid-stroke,
-    // but guard just in case)
     if (!isStylusTouch(touch)) {
       return;
     }
 
-    e.preventDefault(); // keep drawing, no scroll
+    e.preventDefault();
 
     const rect = canvas.getBoundingClientRect();
     const x = touch.clientX - rect.left;
@@ -213,11 +229,13 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (readOnly) return; // 🔒
     e.preventDefault();
     finishStroke();
   };
 
   const handleTouchCancel = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (readOnly) return; // 🔒
     e.preventDefault();
     finishStroke();
   };
@@ -225,6 +243,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   // ---- Undo / Redo / Clear ----
 
   const handleUndo = () => {
+    if (readOnly) return; // 🔒
     if (localStrokes.length === 0) return;
     const newStrokes = localStrokes.slice(0, -1);
     const undone = localStrokes[localStrokes.length - 1];
@@ -234,6 +253,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const handleRedo = () => {
+    if (readOnly) return; // 🔒
     if (redoStack.length === 0) return;
     const last = redoStack[redoStack.length - 1];
     const newRedo = redoStack.slice(0, -1);
@@ -244,6 +264,7 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
   };
 
   const handleClear = () => {
+    if (readOnly) return; // 🔒
     setLocalStrokes([]);
     setRedoStack([]);
     setCurrentStroke(null);
@@ -257,24 +278,41 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
           <button
             type="button"
             className={`btn ${mode === "pen" ? "btn-primary" : ""}`}
-            onClick={() => setMode("pen")}
+            onClick={() => !readOnly && setMode("pen")}
+            disabled={readOnly}
           >
             ✏️ Pencil
           </button>
           <button
             type="button"
             className={`btn ${mode === "eraser" ? "btn-primary" : ""}`}
-            onClick={() => setMode("eraser")}
+            onClick={() => !readOnly && setMode("eraser")}
+            disabled={readOnly}
           >
             🧽 Eraser
           </button>
-          <button type="button" className="btn" onClick={handleUndo}>
+          <button
+            type="button"
+            className="btn"
+            onClick={handleUndo}
+            disabled={readOnly || localStrokes.length === 0}
+          >
             ⤺ Undo
           </button>
-          <button type="button" className="btn" onClick={handleRedo}>
+          <button
+            type="button"
+            className="btn"
+            onClick={handleRedo}
+            disabled={readOnly || redoStack.length === 0}
+          >
             ⤻ Redo
           </button>
-          <button type="button" className="btn" onClick={handleClear}>
+          <button
+            type="button"
+            className="btn"
+            onClick={handleClear}
+            disabled={readOnly || localStrokes.length === 0}
+          >
             Clear
           </button>
         </div>
@@ -284,7 +322,8 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
             <input
               type="color"
               value={color}
-              onChange={(e) => setColor(e.target.value)}
+              onChange={(e) => !readOnly && setColor(e.target.value)}
+              disabled={readOnly}
               style={{ marginLeft: 4 }}
             />
           </label>
@@ -295,7 +334,8 @@ export const CanvasPad: React.FC<CanvasPadProps> = ({ strokes, onChange }) => {
               min={1}
               max={16}
               value={size}
-              onChange={(e) => setSize(Number(e.target.value))}
+              onChange={(e) => !readOnly && setSize(Number(e.target.value))}
+              disabled={readOnly}
               style={{ marginLeft: 4 }}
             />
           </label>

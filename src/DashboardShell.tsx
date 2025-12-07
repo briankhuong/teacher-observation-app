@@ -684,9 +684,15 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           {obs.lesson} • {obs.supportType}
         </div>
         <div className="obs-tags">
-          {obs.status === "draft" && (
-            <span className="obs-draft-tag">Draft</span>
-          )}
+          <span
+            className={
+              obs.status === "saved"
+                ? "obs-tag obs-tag-completed"
+                : "obs-tag obs-tag-draft"
+            }
+          >
+            {obs.status === "saved" ? "Completed" : "Draft"}
+          </span>
           <span className="obs-progress">
             {obs.progress} / {obs.totalIndicators} indicators
           </span>

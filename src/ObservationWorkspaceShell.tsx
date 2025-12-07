@@ -481,8 +481,16 @@ export const ObservationWorkspaceShell: React.FC<
 
   const [indicators, setIndicators] =
     useState<IndicatorState[]>(INITIAL_INDICATORS);
-
   const [activeIndex, setActiveIndex] = useState(0);
+  // Observation-level status: "draft" (editable) or "saved" (completed/locked)
+  const [observationStatus, setObservationStatus] = useState<"draft" | "saved">(
+    "draft"
+  );
+  // For the little "saved at" label (existing behaviour)
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
+  const isLocked = observationStatus === "saved";
+
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [filterMode, setFilterMode] = useState<"all" | "good" | "growth" | "favorites">(
   "all"
@@ -493,7 +501,6 @@ export const ObservationWorkspaceShell: React.FC<
   const [expandedDesc, setExpandedDesc] = useState<Record<string, boolean>>({});
   const [scratchpadText, setScratchpadText] = useState<string>("");
   const [showScratchpad, setShowScratchpad] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const [showExportPreview, setShowExportPreview] = useState(false);
@@ -524,28 +531,31 @@ export const ObservationWorkspaceShell: React.FC<
     // 1️⃣ Try localStorage first (fast / offline)
     // 1️⃣ Try localStorage first (fast / offline)
       try {
-        const raw = localStorage.getItem(storageKey);
-        if (raw) {
-          const parsed: SavedObservationPayload = JSON.parse(raw);
-          if (parsed && Array.isArray(parsed.indicators)) {
-            if (cancelled) return;
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed: SavedObservationPayload = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.indicators)) {
+        if (cancelled) return;
 
-            const normalized = normalizeIndicators(parsed.indicators);
-            const finalIndicators =
-              normalized.length > 0
-                ? (normalized as IndicatorState[])
-                : INITIAL_INDICATORS;
+        const normalized = normalizeIndicators(parsed.indicators);
+        const finalIndicators =
+          normalized.length > 0
+            ? (normalized as IndicatorState[])
+            : INITIAL_INDICATORS;
 
-            setIndicators(finalIndicators);
-            setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
-            setLastSavedAt(parsed.updatedAt ?? null);
-            setScratchpadText(parsed.scratchpadText ?? "");
-            return; // ✅ done, no need to hit Supabase
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load observation from storage", err);
+        setIndicators(finalIndicators);
+        // 🔐 restore observation status (draft / saved)
+        setObservationStatus(parsed.status ?? "draft");
+        setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
+        setLastSavedAt(parsed.updatedAt ?? null);
+        setScratchpadText(parsed.scratchpadText ?? "");
+        return; // ✅ done, no need to hit Supabase
       }
+    }
+  } catch (err) {
+    console.error("Failed to load observation from storage", err);
+  }
+
 
     // 2️⃣ Nothing in localStorage → load from Supabase
     // 2️⃣ Nothing in localStorage → load from Supabase
@@ -566,15 +576,12 @@ export const ObservationWorkspaceShell: React.FC<
         const payload: SavedObservationPayload = {
           id: row.id,
           meta: {
-            teacherName:
-              metaFromDb.teacherName ?? observationMeta.teacherName,
-            schoolName:
-              metaFromDb.schoolName ?? observationMeta.schoolName,
+            teacherName: metaFromDb.teacherName ?? observationMeta.teacherName,
+            schoolName: metaFromDb.schoolName ?? observationMeta.schoolName,
             campus: metaFromDb.campus ?? observationMeta.campus,
             unit: metaFromDb.unit ?? observationMeta.unit,
             lesson: metaFromDb.lesson ?? observationMeta.lesson,
-            supportType:
-              metaFromDb.supportType ?? observationMeta.supportType,
+            supportType: metaFromDb.supportType ?? observationMeta.supportType,
             date: metaFromDb.date ?? observationMeta.date,
           },
           indicators: finalIndicators,
@@ -591,16 +598,18 @@ export const ObservationWorkspaceShell: React.FC<
         }
 
         setIndicators(finalIndicators);
+        // 🔐 restore observation status from DB
+        setObservationStatus(payload.status ?? "draft");
         setSaveStatus(payload.status === "saved" ? "saved" : "idle");
         setLastSavedAt(payload.updatedAt);
         setScratchpadText(payload.scratchpadText ?? "");
-
-    } catch (err) {
-      console.error("[Workspace] Could not load observation from DB", err);
+      } catch (err) {
+        console.error("[Workspace] Could not load observation from DB", err);
 
       if (!cancelled) {
         // fall back to fresh blank observation
         setIndicators(INITIAL_INDICATORS);
+        setObservationStatus("draft");
         setSaveStatus("idle");
         setLastSavedAt(null);
         setScratchpadText("");
@@ -653,27 +662,33 @@ const persistObservation = React.useCallback(
 
   // Debounce: save ~800ms after the last change
   saveTimeoutRef.current = window.setTimeout(() => {
-    const payload: SavedObservationPayload = {
-      id: observationMeta.id,
-      meta: {
-        teacherName,
-        schoolName,
-        campus,
-        unit,
-        lesson,
-        supportType,
-        date,
-      },
-      indicators,
-      status: "draft",
-      updatedAt: Date.now(),
-      scratchpadText,
-    };
+  const payload: SavedObservationPayload = {
+    id: observationMeta.id,
+    meta: {
+      teacherName,
+      schoolName,
+      campus,
+      unit,
+      lesson,
+      supportType,
+      date,
+    },
+    indicators,
+    status: observationStatus,       // 🔒 now respects lock status
+    updatedAt: Date.now(),
+    scratchpadText,
+  };
 
-    persistObservation(payload);
-    setLastSavedAt(payload.updatedAt);
-    setCanvasDirty(false); // auto-save completed, ink is saved
-  }, 800);
+  persistObservation(payload);
+
+  setLastSavedAt(payload.updatedAt);
+  setSaveStatus(
+    observationStatus === "saved" ? "saved" : "idle"
+  );
+
+  setCanvasDirty(false);
+}, 800);
+
 
   return () => {
     if (saveTimeoutRef.current) {
@@ -702,13 +717,11 @@ const persistObservation = React.useCallback(
   }).length;
 
   const handleManualSave = () => {
-  // 1️⃣ Flush any unsaved canvas strokes for the active indicator
   if (canvasDirty) {
     handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
     setCanvasDirty(false);
   }
 
-  // 2️⃣ Then build the payload and save
   try {
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
@@ -719,24 +732,26 @@ const persistObservation = React.useCallback(
         unit,
         lesson,
         supportType,
-        date,          // ✅ include date
+        date,
       },
       indicators,
-      status: "draft",
+      status: observationStatus,   // 🔒 important!
       updatedAt: Date.now(),
     };
 
     localStorage.setItem(storageKey, JSON.stringify(payload));
     setLastSavedAt(payload.updatedAt);
-    setSaveStatus("saved");
+    setSaveStatus(
+      observationStatus === "saved" ? "saved" : "idle"
+    );
   } catch (err) {
     console.error("Manual save failed", err);
   }
 };
 
+
 const handleBackToDashboard = () => {
   try {
-    // If there is unsaved ink for the current indicator, flush it
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
       setCanvasDirty(false);
@@ -751,16 +766,18 @@ const handleBackToDashboard = () => {
         unit,
         lesson,
         supportType,
-        date
+        date,
       },
       indicators,
-      status: "draft",
+      status: observationStatus,     // 🔒 respect locked state
       updatedAt: Date.now(),
     };
 
     localStorage.setItem(storageKey, JSON.stringify(payload));
     setLastSavedAt(payload.updatedAt);
-    setSaveStatus("idle");
+    setSaveStatus(
+      observationStatus === "saved" ? "saved" : "idle"
+    );
   } catch (err) {
     console.error("Back-to-dashboard save failed", err);
   }
@@ -768,7 +785,63 @@ const handleBackToDashboard = () => {
   onBack();
 };
 
+const handleMarkCompleted = async () => {
+  if (isLocked) return;
 
+  // Flush unsaved strokes
+  if (canvasDirty) {
+    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+    setCanvasDirty(false);
+  }
+
+  const payload: SavedObservationPayload = {
+    id: observationMeta.id,
+    meta: {
+      teacherName,
+      schoolName,
+      campus,
+      unit,
+      lesson,
+      supportType,
+      date,
+    },
+    indicators,
+    status: "saved",
+    updatedAt: Date.now(),
+    scratchpadText,
+  };
+
+  setObservationStatus("saved");
+  setSaveStatus("saved");
+  setLastSavedAt(payload.updatedAt);
+  await persistObservation(payload);
+};
+
+const handleReopenDraft = async () => {
+  if (!isLocked) return;
+
+  const payload: SavedObservationPayload = {
+    id: observationMeta.id,
+    meta: {
+      teacherName,
+      schoolName,
+      campus,
+      unit,
+      lesson,
+      supportType,
+      date,
+    },
+    indicators,
+    status: "draft",
+    updatedAt: Date.now(),
+    scratchpadText,
+  };
+
+  setObservationStatus("draft");
+  setSaveStatus("saved");
+  setLastSavedAt(payload.updatedAt);
+  await persistObservation(payload);
+};
 
     const handleExportTeacher = async () => {
     if (canvasDirty) {
@@ -948,10 +1021,12 @@ useEffect(() => {
 }, [canvasDirty]);
 
 
-  const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
+const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
+  if (isLocked) return; // 🔒 prevent drawing when locked
   updateIndicator(index, { strokes: newStrokes });
   setCanvasDirty(true);  // 🟡 canvas has unsaved handwriting
 };
+
 
 const handleConvertHandwritingToText = async () => {
   setOcrError(null);
@@ -1166,6 +1241,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
   };
 
   const handleCommentChange = (index: number, value: string) => {
+  if (isLocked) return;
   const ind = indicators[index];
 
   // Check if the user has removed ALL OCR content
@@ -1233,6 +1309,39 @@ const toggleIncludeInTrainerSummary = (index: number) => {
       ))}
     </>
   );
+const handleToggleLock = async () => {
+  if (canvasDirty) {
+    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+    setCanvasDirty(false);
+  }
+
+  const nextStatus: "draft" | "saved" =
+    observationStatus === "draft" ? "saved" : "draft";
+
+  const payload: SavedObservationPayload = {
+    id: observationMeta.id,
+    meta: {
+      teacherName,
+      schoolName,
+      campus,
+      unit,
+      lesson,
+      supportType,
+      date,
+    },
+    indicators,
+    status: nextStatus,
+    updatedAt: Date.now(),
+    scratchpadText,
+  };
+
+  await persistObservation(payload);
+
+  setObservationStatus(nextStatus);
+  setLastSavedAt(payload.updatedAt);
+  setSaveStatus(nextStatus === "saved" ? "saved" : "idle");
+};
+
 
   return (
     <div className="workspace-root">
@@ -1253,11 +1362,25 @@ const toggleIncludeInTrainerSummary = (index: number) => {
         <div className="workspace-btn-group">
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn" type="button" onClick={handleManualSave}>
+              <button
+                className="btn"
+                type="button"
+                onClick={handleManualSave}
+                disabled={isLocked}
+              >
                 Save
               </button>
 
-              {/* 🔍 TEACHER PREVIEW BUTTON (brings back preview panel) */}
+              <button
+                className="btn"
+                type="button"
+                onClick={handleToggleLock}
+                style={{ fontWeight: 600 }}
+              >
+                {isLocked ? "Reopen as Draft" : "Mark Completed / Lock"}
+              </button>
+
+              {/* 🔍 PREVIEWS */}
               <button className="btn" type="button" onClick={handleExportPreview}>
                 Preview (teacher)
               </button>
@@ -1266,17 +1389,16 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                 Preview (admin)
               </button>
 
-              {/* ⬇️ ACTUAL TEACHER EXPORT */}
+              {/* EXPORT */}
               <button className="btn" type="button" onClick={handleExportTeacher}>
                 Export (teacher)
               </button>
 
-              {/* 🆕 ADMIN EXPORT */}
               <button className="btn" type="button" onClick={handleExportAdmin}>
                 Export (admin)
               </button>
 
-              {/* ✏️ SCRATCHPAD */}
+              {/* SCRATCHPAD */}
               <button
                 className="btn"
                 type="button"
@@ -1301,6 +1423,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
             </div>
           </div>
         </div>
+
       </div>
 
       <section className="main-layout">
@@ -1561,9 +1684,11 @@ const toggleIncludeInTrainerSummary = (index: number) => {
             </div>
 
             <CanvasPad
-              strokes={active.strokes}
-              onChange={(s) => handleStrokesChange(activeIndex, s)}
-            />
+            strokes={active.strokes}
+            onChange={(s) => handleStrokesChange(activeIndex, s)}
+            readOnly={isLocked}
+          />
+
 
             {/* 🔤 Manual OCR button */}
             <div
@@ -1668,6 +1793,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
               value={active.commentText}
               onChange={(e) => handleCommentChange(activeIndex, e.target.value)}
               rows={5}
+              readOnly={isLocked}
               style={{
                 width: "100%",
                 resize: "vertical",
