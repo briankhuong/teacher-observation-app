@@ -410,6 +410,7 @@ body {
   align-items: center;
   gap: 6px;
   margin-top: 2px;
+  margin-bottom: 6px;
 }
 
 /* Draft pill */
@@ -1684,40 +1685,162 @@ input[type="date"].input {
   font-size: 12px;
   color: #6b7280;
 }
-/* make inner layout two columns: left content + right date */
-.obs-row-main {
+/* Bottom row that holds tags + Teacher/Admin menus */
+/* =========================================================
+   OBSERVATION CARD — BOTTOM ROW (TAGS + TEACHER / ADMIN)
+   ========================================================= */
+
+/* The row under the observation meta */
+.obs-bottom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  gap: 16px;
+}
+
+/* Left side: Draft/Completed + progress */
+.obs-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Right side: Teacher / Admin pill buttons */
+.obs-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Pill-style buttons */
+.obs-pill-button {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.80);
+  color: #cbd5e1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.obs-pill-button:hover {
+  background: rgba(59, 130, 246, 0.30);
+  border-color: rgba(148, 163, 184, 0.70);
+  color: #f1f5f9;
+}
+
+/* =========================================================
+   MODAL (for Teacher/Admin action dialogs)
+   ========================================================= */
+
+.obs-action-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.70);
+  backdrop-filter: blur(3px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+.obs-action-modal {
+  background: #020617;
+  border-radius: 12px;
+  padding: 18px 20px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  width: 90%;
+  max-width: 360px;
+  color: #e2e8f0;
+}
+
+/* Header */
+.obs-action-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  width: 100%;
+  margin-bottom: 14px;
 }
 
-/* bottom line: status/progress + action buttons */
-.obs-row-bottom {
+.obs-action-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #f1f5f9;
+}
+
+.obs-action-modal-desc {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+/* Body */
+.obs-action-modal-body {
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 16px;          /* space between tags and buttons group */
-  margin-top: 8px;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-/* action buttons group */
-.obs-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;           /* space between individual buttons */
-}
-
-/* tiny pill buttons */
-.btn-xs {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+/* Action buttons inside modal */
+.obs-action-button {
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 6px;
+  font-size: 13px;
+  color: #cbd5e1;
   cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
 }
 
-.btn-xs:hover {
-  background: rgba(255, 255, 255, 0.14);
+.obs-action-button:hover {
+  background: rgba(59, 130, 246, 0.35);
+  border-color: rgba(129, 140, 248, 0.9);
+  color: #f1f5f9;
+}
+
+/* Close button */
+.obs-action-modal-close {
+  padding: 6px 10px;
+  background: rgba(30, 41, 59, 0.7);
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+/* Remove margin from last button (Merge teacher workbook) */
+.obs-action-modal-body button:last-child {
+  margin-bottom: 0;
+}
+
+/* Add slight separation above the Cancel footer */
+.obs-action-modal-footer {
+  margin-top: 12px;      /* ← separates Cancel from action list */
+}
+
+.obs-action-modal-close:hover {
+  background: rgba(59, 130, 246, 0.4);
+  color: #f1f5f9;
+}
+/* Increase spacing inside the Teacher/Admin dialog buttons */
+.modal-action-list button {
+  margin-bottom: 8px;  /* ← Adds vertical spacing between all buttons */
+}
+
+/* Remove bottom space from the last button (Cancel) */
+.modal-action-list button:last-child {
+  margin-bottom: 0;
+}
+
+.obs-dialog-actions button {
+  margin-bottom: 8px;
+}
+.obs-dialog-actions button:last-child {
+  margin-bottom: 0;
 }

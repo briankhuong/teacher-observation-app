@@ -199,28 +199,36 @@ function groupBy<T>(
   }));
 }
 
+
 /* ------------------------------
    COMPONENT
 --------------------------------- */
+
 export const DashboardShell: React.FC<DashboardProps> = ({
   onOpenObservation,
 }) => {
-  const { user } = useAuth();
-
-  const [observations, setObservations] = useState<DashboardObservationRow[]>(
-    []
-  );
-  const [groupMode, setGroupMode] = useState<GroupMode>("month");
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
-  const [searchText, setSearchText] = useState("");
-
-  // AM summary UI state
+ 
+const { user } = useAuth();
+ const [observations, setObservations] =
+   useState<DashboardObservationRow[]>([]);
+ const [groupMode, setGroupMode] = useState<GroupMode>("month");
+ const [sortMode, setSortMode] = useState<SortMode>("newest");
+ const [searchText, setSearchText] = useState("");
+ // NEW: central modal state for Teacher/Admin actions
+ const [actionModal, setActionModal] = useState<{
+   obsId: string;
+   role: "teacher" | "admin";
+ } | null>(null);
+ // AM summary UI state
+  
   const [showAmSummary, setShowAmSummary] = useState(false);
   const [summaryMonth, setSummaryMonth] = useState<string>("");
   const [summaryAmKey, setSummaryAmKey] = useState<string>("");
   const [summaryRows, setSummaryRows] = useState<AmSummaryRow[]>([]);
   const [amSummarySentMap, setAmSummarySentMap] =
     useState<AmSummarySentMap>({});
+
+  
 
   /* ------------------------------
      LOAD OBSERVATIONS + SUMMARY META
@@ -649,12 +657,17 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   }, [amSummarySentMap, summaryAmKey, summaryMonth]);
 
 
-
-
-
+// Observation currently targeted by the Teacher/Admin action modal
+ const modalObservation = React.useMemo(() => {
+   if (!actionModal) return null;
+   return (
+     observations.find((o) => o.id === actionModal.obsId) ?? null
+   );
+ }, [actionModal, observations]);
   /* ------------------------------
      CARD RENDERER
   --------------------------------- */
+
   const handlePreCallEmail = (obs: DashboardObservationRow) => {
     console.log("[Pre-call email] for obs", obs.id);
     // TODO: plug real pre-call email logic here
@@ -680,127 +693,93 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     // TODO: build + send admin update email
   };
 
-  const renderRow = (obs: DashboardObservationRow) => (
-  <button
-    key={obs.id}
-    type="button"
-    className="obs-row"
-    onClick={() =>
-      onOpenObservation({
-        id: obs.id,
-        teacherName: obs.teacherName,
-        schoolName: obs.schoolName,
-        campus: obs.campus,
-        unit: obs.unit,
-        lesson: obs.lesson,
-        supportType: obs.supportType,
-        date: obs.isoDate || "",
-      })
-    }
-  >
-    <div
-      className={`obs-status-strip ${
-        obs.statusColor === "good"
-          ? "obs-status-good"
-          : obs.statusColor === "growth"
-          ? "obs-status-growth"
-          : "obs-status-mixed"
-      }`}
-    />
-
-    <div className="obs-row-main">
-      {/* LEFT SIDE: teacher + meta + tags + actions */}
-      <div className="obs-row-left">
-        <div className="obs-row-header">
-          <div className="obs-teacher">{obs.teacherName}</div>
-        </div>
-
-        <div className="obs-meta">
-          {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
-          {obs.lesson} • {obs.supportType}
-        </div>
-
-        {/* status + progress + actions in one bottom row */}
-        <div className="obs-row-bottom">
-          <div className="obs-tags">
-            <span
-              className={
-                obs.status === "saved"
-                  ? "obs-tag obs-tag-completed"
-                  : "obs-tag obs-tag-draft"
-              }
-            >
-              {obs.status === "saved" ? "Completed" : "Draft"}
-            </span>
-            <span className="obs-progress">
-              {obs.progress} / {obs.totalIndicators} indicators
-            </span>
-          </div>
-
-          <div className="obs-card-actions">
-            <button
-              type="button"
-              className="btn-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                handlePreCallEmail(obs);
-              }}
-            >
-              Pre call
-            </button>
-
-            <button
-              type="button"
-              className="btn-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                handlePostCallEmail(obs);
-              }}
-            >
-              Post call
-            </button>
-
-            <button
-              type="button"
-              className="btn-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleMergeTeacherWorkbook(obs);
-              }}
-            >
-              Merge teacher
-            </button>
-
-            <button
-              type="button"
-              className="btn-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleMergeAdminWorkbook(obs);
-              }}
-            >
-              Merge admin
-            </button>
-
-            <button
-              type="button"
-              className="btn-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAdminUpdateEmail(obs);
-              }}
-            >
-              Admin update
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* RIGHT SIDE: date */}
-      <div className="obs-date">{obs.dateLabel}</div>
-    </div>
-  </button>
-);
+const renderRow = (obs: DashboardObservationRow) => {
+   const handleOpenWorkspace = () => {
+     onOpenObservation({
+       id: obs.id,
+       teacherName: obs.teacherName,
+       schoolName: obs.schoolName,
+       campus: obs.campus,
+       unit: obs.unit,
+       lesson: obs.lesson,
+       supportType: obs.supportType,
+       date: obs.isoDate || "",
+     });
+   };
+   const openTeacherModal = (
+     e: React.MouseEvent<HTMLButtonElement>
+   ) => {
+     e.stopPropagation();
+     setActionModal({ obsId: obs.id, role: "teacher" });
+   };
+   const openAdminModal = (
+     e: React.MouseEvent<HTMLButtonElement>
+   ) => {
+     e.stopPropagation();
+     setActionModal({ obsId: obs.id, role: "admin" });
+   };
+   return (
+<button
+       key={obs.id}
+       type="button"
+       className="obs-row"
+       onClick={handleOpenWorkspace}
+>
+<div
+         className={`obs-status-strip ${
+           obs.statusColor === "good"
+             ? "obs-status-good"
+             : obs.statusColor === "growth"
+             ? "obs-status-growth"
+             : "obs-status-mixed"
+         }`}
+       />
+<div className="obs-row-left">
+<div className="obs-row-header">
+<div className="obs-teacher">{obs.teacherName}</div>
+</div>
+<div className="obs-meta">
+           {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
+           {obs.lesson} • {obs.supportType}
+</div>
+         {/* tags row + Teacher/Admin pills under it */}
+<div className="obs-tags-row">
+<div className="obs-tags">
+<span
+               className={
+                 obs.status === "saved"
+                   ? "obs-tag obs-tag-completed"
+                   : "obs-tag obs-tag-draft"
+               }
+>
+               {obs.status === "saved" ? "Completed" : "Draft"}
+</span>
+<span className="obs-progress">
+               {obs.progress} / {obs.totalIndicators} indicators
+</span>
+</div>
+<div className="obs-pill-row">
+<button
+               type="button"
+               className="obs-pill-button"
+               onClick={openTeacherModal}
+>
+               Teacher…
+</button>
+<button
+               type="button"
+               className="obs-pill-button"
+               onClick={openAdminModal}
+>
+               Admin…
+</button>
+</div>
+</div>
+</div>
+<div className="obs-date">{obs.dateLabel}</div>
+</button>
+   );
+ };
 
   /* ------------------------------
      UI
@@ -891,6 +870,169 @@ export const DashboardShell: React.FC<DashboardProps> = ({
               ))}
         </div>
       </div>
+      
+      {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
+
+      {actionModal && modalObservation && (
+<div
+
+          className="obs-action-modal-backdrop"
+
+          onClick={() => setActionModal(null)}
+>
+<div
+
+            className="obs-action-modal"
+
+            onClick={(e) => e.stopPropagation()}
+>
+<div className="obs-action-modal-header">
+<div className="obs-action-modal-title">
+
+                {actionModal.role === "teacher"
+
+                  ? "Teacher actions"
+
+                  : "Admin actions"}
+</div>
+<div className="obs-action-modal-subtitle">
+
+                {modalObservation.teacherName} –{" "}
+
+                {modalObservation.schoolName} •{" "}
+
+                {modalObservation.campus}
+</div>
+</div>
+<div className="obs-action-modal-body">
+
+              {actionModal.role === "teacher" ? (
+<>
+<button
+
+                    type="button"
+
+                    className="btn"
+
+                    onClick={() => {
+
+                      setActionModal(null);
+
+                      alert("Pre call email (TODO wire up)");
+
+                    }}
+>
+
+                    Pre call email
+</button>
+<button
+
+                    type="button"
+
+                    className="btn"
+
+                    onClick={() => {
+
+                      setActionModal(null);
+
+                      alert("Post call email (TODO wire up)");
+
+                    }}
+>
+
+                    Post call email
+</button>
+<button
+
+                    type="button"
+
+                    className="btn"
+
+                    onClick={() => {
+
+                      setActionModal(null);
+
+                      alert(
+
+                        "Merge teacher workbook (TODO wire up)"
+
+                      );
+
+                    }}
+>
+
+                    Merge teacher workbook
+</button>
+</>
+
+              ) : (
+<>
+<button
+
+                    type="button"
+
+                    className="btn"
+
+                    onClick={() => {
+
+                      setActionModal(null);
+
+                      alert(
+
+                        "Merge admin workbook (TODO wire up)"
+
+                      );
+
+                    }}
+>
+
+                    Merge admin workbook
+</button>
+<button
+
+                    type="button"
+
+                    className="btn"
+
+                    onClick={() => {
+
+                      setActionModal(null);
+
+                      alert(
+
+                        "Admin update email (TODO wire up)"
+
+                      );
+
+                    }}
+>
+
+                    Admin update email
+</button>
+</>
+
+              )}
+</div>
+<div className="obs-action-modal-footer">
+<button
+
+                type="button"
+
+                className="btn"
+
+                onClick={() => setActionModal(null)}
+>
+
+                Cancel
+</button>
+</div>
+</div>
+</div>
+
+      )}
+
+      {/* ---------- AM SUMMARY MODAL ---------- */}
+ 
 
       {/* ---------- AM SUMMARY MODAL ---------- */}
       {showAmSummary && (
