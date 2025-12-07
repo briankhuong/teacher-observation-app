@@ -267,22 +267,24 @@ export const SchoolsScreen: React.FC = () => {
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingRow, setEditingRow] = useState<SchoolRow | null>(null);
 
-if (!user) {
-  // AuthGate should prevent this, but just in case
-  return (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">Schools</div>
-      </div>
-      <div className="card-body">
-        <p>You must be signed in to manage schools.</p>
-      </div>
-    </div>
-  );
-}
+  // NEW: active row id
+  const [activeSchoolId, setActiveSchoolId] = useState<string | null>(null);
 
-// ✅ from here down, user is non-null
-const trainerId = user.id;
+  if (!user) {
+    // AuthGate should prevent this, but just in case
+    return (
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Schools</div>
+        </div>
+        <div className="card-body">
+          <p>You must be signed in to manage schools.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const trainerId = user.id;
 
   // Load schools for this trainer
   useEffect(() => {
@@ -355,12 +357,14 @@ const trainerId = user.id;
     setFormMode("create");
     setEditingRow(null);
     setShowForm(true);
+    setActiveSchoolId(null);
   };
 
   const openEdit = (row: SchoolRow) => {
     setFormMode("edit");
     setEditingRow(row);
     setShowForm(true);
+    setActiveSchoolId(row.id);
   };
 
   const handleDelete = async (row: SchoolRow) => {
@@ -382,6 +386,9 @@ const trainerId = user.id;
     }
 
     setRows((prev) => prev.filter((s) => s.id !== row.id));
+    if (activeSchoolId === row.id) {
+      setActiveSchoolId(null);
+    }
   };
 
   const submitForm = async (values: SchoolFormState) => {
@@ -429,7 +436,9 @@ const trainerId = user.id;
         return;
       }
 
-      setRows((prev) => [...prev, data as SchoolRow]);
+      const newRow = data as SchoolRow;
+      setRows((prev) => [...prev, newRow]);
+      setActiveSchoolId(newRow.id);
       setShowForm(false);
       return;
     }
@@ -475,15 +484,17 @@ const trainerId = user.id;
       )
       .single();
 
-    if (error) {
+  if (error) {
       console.error("[DB] update school error", error);
       alert("Could not save changes. Please try again.");
       return;
     }
 
+    const updated = data as SchoolRow;
     setRows((prev) =>
-      prev.map((r) => (r.id === editingRow.id ? (data as SchoolRow) : r))
+      prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
+    setActiveSchoolId(updated.id);
     setShowForm(false);
   };
 
@@ -565,51 +576,81 @@ const trainerId = user.id;
               <table className="simple-table">
                 <thead>
                   <tr>
-                    <th>School</th>
-                    <th>Campus</th>
+                    <th>School & campus</th>
                     <th>Admin</th>
                     <th>AM</th>
                     <th>City</th>
-                    <th style={{ width: 120 }}>Actions</th>
+                    <th style={{ width: 140 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.school_name}</td>
-                      <td>{row.campus_name}</td>
-                      <td>
-                        <div>{row.admin_name}</div>
-                        <div className="small-muted">{row.admin_email}</div>
-                      </td>
-                      <td>
-                        <div>{row.am_name}</div>
-                        <div className="small-muted">{row.am_email}</div>
-                      </td>
-                      <td>
-                        {row.city}
-                        {row.district ? ` – ${row.district}` : ""}
-                      </td>
-                      <td>
-                        <div className="table-actions">
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => openEdit(row)}
+                  {filteredRows.map((row) => {
+                    const isActive = row.id === activeSchoolId;
+                    return (
+                      <tr
+                        key={row.id}
+                        className={
+                          "simple-table-row" +
+                          (isActive ? " simple-table-row--active" : "")
+                        }
+                        onClick={() => setActiveSchoolId(row.id)}
+                      >
+                        <td>
+                          <div className="entity-cell-main">
+                            {row.school_name}
+                          </div>
+                          <div className="entity-cell-sub">
+                            {row.campus_name}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="entity-cell-main">
+                            {row.admin_name || "—"}
+                          </div>
+                          <div className="entity-cell-sub">
+                            {row.admin_email || ""}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="entity-cell-main">
+                            {row.am_name || "—"}
+                          </div>
+                          <div className="entity-cell-sub">
+                            {row.am_email || ""}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="entity-cell-main">
+                            {row.city || "—"}
+                          </div>
+                          <div className="entity-cell-sub">
+                            {row.district || ""}
+                          </div>
+                        </td>
+                        <td>
+                          <div
+                            className="table-actions"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => handleDelete(row)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => openEdit(row)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => handleDelete(row)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

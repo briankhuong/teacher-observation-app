@@ -1,24 +1,21 @@
 // src/TeachersScreen.tsx
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-  useCallback,
-} from "react";
-import type { FormEvent } from "react";
-
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
-import {
-  fetchTeachers,
-  createTeacher,
-  updateTeacher,
-  deleteTeacher,
-  type TeacherRow,
-} from "./db/teachers";
-import { SCHOOL_MASTER_LIST } from "./schoolMaster";
+
+export interface TeacherRow {
+  id: string;
+  trainer_id: string;
+  name: string;
+  email: string | null;
+  school_name: string;
+  campus: string;
+  worksheet_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 type TeacherFormState = {
-  id?: string;
   name: string;
   email: string;
   school_name: string;
@@ -26,402 +23,538 @@ type TeacherFormState = {
   worksheet_url: string;
 };
 
+const emptyForm: TeacherFormState = {
+  name: "",
+  email: "",
+  school_name: "",
+  campus: "",
+  worksheet_url: "",
+};
+
+interface TeacherFormModalProps {
+  open: boolean;
+  mode: "create" | "edit";
+  initial?: TeacherFormState;
+  onCancel: () => void;
+  onSubmit: (values: TeacherFormState) => Promise<void>;
+}
+
+const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
+  open,
+  mode,
+  initial,
+  onCancel,
+  onSubmit,
+}) => {
+  const [form, setForm] = useState<TeacherFormState>(initial ?? emptyForm);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setForm(initial ?? emptyForm);
+      setSubmitting(false);
+    }
+  }, [open, initial]);
+
+  if (!open) return null;
+
+  const handleChange =
+    (field: keyof TeacherFormState) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setForm((prev) => ({ ...prev, [field]: e.target.value }));
+    };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.school_name.trim() || !form.campus.trim()) {
+      alert("Please fill in Teacher, School and Campus.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await onSubmit(form);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-panel">
+        <div className="modal-header">
+          <div className="modal-title">
+            {mode === "create" ? "Add teacher" : "Edit teacher"}
+          </div>
+          <button type="button" className="btn" onClick={onCancel}>
+            ×
+          </button>
+        </div>
+
+        <form className="modal-body" onSubmit={handleSubmit}>
+          <div className="form-row">
+            <label>Teacher name *</label>
+            <input
+              className="input"
+              type="text"
+              value={form.name}
+              onChange={handleChange("name")}
+              placeholder="e.g. Hannah"
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Email</label>
+            <input
+              className="input"
+              type="email"
+              value={form.email}
+              onChange={handleChange("email")}
+              placeholder="teacher@example.com"
+            />
+          </div>
+
+          <div className="form-row">
+            <label>School *</label>
+            <input
+              className="input"
+              type="text"
+              value={form.school_name}
+              onChange={handleChange("school_name")}
+              placeholder="e.g. VSK Sunshine"
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Campus *</label>
+            <input
+              className="input"
+              type="text"
+              value={form.campus}
+              onChange={handleChange("campus")}
+              placeholder="e.g. Cổ Nhuế"
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Worksheet link</label>
+            <input
+              className="input"
+              type="url"
+              value={form.worksheet_url}
+              onChange={handleChange("worksheet_url")}
+              placeholder="Paste OneDrive workbook URL…"
+            />
+          </div>
+
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn"
+              onClick={onCancel}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={submitting}
+            >
+              {submitting
+                ? mode === "create"
+                  ? "Creating…"
+                  : "Saving…"
+                : mode === "create"
+                ? "Create"
+                : "Save changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 export const TeachersScreen: React.FC = () => {
   const { user } = useAuth();
 
-  const [teachers, setTeachers] = useState<TeacherRow[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchText, setSearchText] = useState<string>("");
+  const [rows, setRows] = useState<TeacherRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTeacherId, setEditingTeacherId] = useState<string | null>(null);
-  const [form, setForm] = useState<TeacherFormState>({
-    name: "",
-    email: "",
-    school_name: "",
-    campus: "",
-    worksheet_url: "",
-  });
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [formMode, setFormMode] = useState<"create" | "edit">("create");
+  const [editingRow, setEditingRow] = useState<TeacherRow | null>(null);
 
-  // ---------- Helpers for school / campus options ----------
+  // NEW: active row highlight
+  const [activeTeacherId, setActiveTeacherId] = useState<string | null>(null);
 
-  const schoolOptions = useMemo(
-    () =>
-      Array.from(new Set(SCHOOL_MASTER_LIST.map((s) => s.schoolName))).sort(),
-    []
-  );
+  if (!user) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Teachers</div>
+        </div>
+        <div className="card-body">
+          <p>You must be signed in to manage teachers.</p>
+        </div>
+      </div>
+    );
+  }
 
-  const campusOptions = useMemo(() => {
-    if (!form.school_name) return [] as string[];
+  const trainerId = user.id;
 
-    const fromMaster = SCHOOL_MASTER_LIST
-      .filter((s) => s.schoolName === form.school_name)
-      .map((s) => s.campusName);
-
-    const uniqueMaster = Array.from(new Set(fromMaster));
-
-    // Ensure the current campus (when editing) still appears
-    if (
-      form.campus &&
-      !uniqueMaster.includes(form.campus) &&
-      !form.campus.startsWith("Select ")
-    ) {
-      return [form.campus, ...uniqueMaster];
-    }
-
-    return uniqueMaster;
-  }, [form.school_name, form.campus]);
-
-  // ---------- Load teachers from DB ----------
-
-  const loadTeachers = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await fetchTeachers();
-      setTeachers(data);
-    } catch (err: any) {
-      console.error("[DB] Could not load teachers", err);
-      setError("Could not load teachers.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // Load teachers for this trainer
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadTeachers() {
+      try {
+        setLoading(true);
+        setLoadError(null);
+
+        const { data, error } = await supabase
+          .from("teachers")
+          .select(
+            `
+            id,
+            trainer_id,
+            name,
+            email,
+            school_name,
+            campus,
+            worksheet_url,
+            created_at,
+            updated_at
+          `
+          )
+          .eq("trainer_id", trainerId)
+          .order("school_name", { ascending: true })
+          .order("campus", { ascending: true })
+          .order("name", { ascending: true });
+
+        if (error) {
+          console.error("[DB] load teachers error", error);
+          if (!cancelled) setLoadError(error.message);
+          return;
+        }
+
+        if (!cancelled && data) {
+          setRows(data as TeacherRow[]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
     loadTeachers();
-  }, [loadTeachers]);
+    return () => {
+      cancelled = true;
+    };
+  }, [trainerId]);
 
-  // ---------- Filtering ----------
-
-  const filteredTeachers = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    if (!q) return teachers;
-
-    return teachers.filter((t) => {
+  // Search
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
       return (
-        t.name.toLowerCase().includes(q) ||
-        t.school_name.toLowerCase().includes(q) ||
-        t.campus.toLowerCase().includes(q) ||
-        (t.email ?? "").toLowerCase().includes(q)
+        r.name.toLowerCase().includes(q) ||
+        r.school_name.toLowerCase().includes(q) ||
+        r.campus.toLowerCase().includes(q) ||
+        (r.email ?? "").toLowerCase().includes(q)
       );
     });
-  }, [teachers, searchText]);
+  }, [rows, search]);
 
-  // ---------- Modal handlers ----------
-
-  const openNewModal = () => {
-    setEditingTeacherId(null);
-    setForm({
-      name: "",
-      email: "",
-      school_name: "",
-      campus: "",
-      worksheet_url: "",
-    });
-    setIsModalOpen(true);
+  // UI helpers
+  const openCreate = () => {
+    setFormMode("create");
+    setEditingRow(null);
+    setShowForm(true);
+    setActiveTeacherId(null);
   };
 
-  const openEditModal = (row: TeacherRow) => {
-    setEditingTeacherId(row.id);
-    setForm({
-      id: row.id,
-      name: row.name,
-      email: row.email ?? "",
-      school_name: row.school_name,
-      campus: row.campus,
-      worksheet_url: row.worksheet_url ?? "",
-    });
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-  };
-
-  const handleFormChange = (
-    field: keyof TeacherFormState,
-    value: string
-  ) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!user?.id) {
-      alert("You must be signed in to manage teachers.");
-      return;
-    }
-
-    if (!form.name.trim() || !form.school_name || !form.campus) {
-      alert("Please enter teacher name, school, and campus.");
-      return;
-    }
-
-    try {
-      if (editingTeacherId) {
-        // Update existing teacher
-        const updated = await updateTeacher(editingTeacherId, {
-          name: form.name.trim(),
-          email: form.email.trim() || null,
-          school_name: form.school_name,
-          campus: form.campus,
-          worksheet_url: form.worksheet_url.trim() || null,
-        });
-
-        setTeachers((prev) =>
-          prev.map((t) => (t.id === updated.id ? updated : t))
-        );
-      } else {
-        // Create new teacher
-        const created = await createTeacher(user.id, {
-          name: form.name.trim(),
-          email: form.email.trim() || undefined,
-          school_name: form.school_name,
-          campus: form.campus,
-          worksheet_url: form.worksheet_url.trim() || undefined,
-        });
-
-        setTeachers((prev) => [...prev, created].sort((a, b) =>
-          a.name.localeCompare(b.name)
-        ));
-      }
-
-      setIsModalOpen(false);
-    } catch (err: any) {
-      console.error("[DB] Save teacher failed", err);
-      alert("Could not save teacher. Please try again.");
-    }
+  const openEdit = (row: TeacherRow) => {
+    setFormMode("edit");
+    setEditingRow(row);
+    setShowForm(true);
+    setActiveTeacherId(row.id);
   };
 
   const handleDelete = async (row: TeacherRow) => {
     const ok = window.confirm(
-      `Delete teacher "${row.name}"? This cannot be undone.`
+      `Delete teacher "${row.name}"?\nThis cannot be undone.`
     );
     if (!ok) return;
 
-    try {
-      await deleteTeacher(row.id);
-      setTeachers((prev) => prev.filter((t) => t.id !== row.id));
-    } catch (err: any) {
-      console.error("[DB] Delete teacher failed", err);
-      alert("Could not delete teacher.");
+    const { error } = await supabase
+      .from("teachers")
+      .delete()
+      .eq("id", row.id)
+      .eq("trainer_id", trainerId);
+
+    if (error) {
+      console.error("[DB] delete teacher error", error);
+      alert("Could not delete teacher. Please try again.");
+      return;
+    }
+
+    setRows((prev) => prev.filter((t) => t.id !== row.id));
+    if (activeTeacherId === row.id) {
+      setActiveTeacherId(null);
     }
   };
 
-  // ---------- Render ----------
+  const submitForm = async (values: TeacherFormState) => {
+    if (formMode === "create") {
+      const { data, error } = await supabase
+        .from("teachers")
+        .insert({
+          trainer_id: trainerId,
+          name: values.name.trim(),
+          email: values.email.trim() || null,
+          school_name: values.school_name.trim(),
+          campus: values.campus.trim(),
+          worksheet_url: values.worksheet_url.trim() || null,
+        })
+        .select(
+          `
+          id,
+          trainer_id,
+          name,
+          email,
+          school_name,
+          campus,
+          worksheet_url,
+          created_at,
+          updated_at
+        `
+        )
+        .single();
+
+      if (error) {
+        console.error("[DB] create teacher error", error);
+        alert("Could not create teacher. Please try again.");
+        return;
+      }
+
+      const newRow = data as TeacherRow;
+      setRows((prev) => [...prev, newRow]);
+      setActiveTeacherId(newRow.id);
+      setShowForm(false);
+      return;
+    }
+
+    if (!editingRow) return;
+
+    const { data, error } = await supabase
+      .from("teachers")
+      .update({
+        name: values.name.trim(),
+        email: values.email.trim() || null,
+        school_name: values.school_name.trim(),
+        campus: values.campus.trim(),
+        worksheet_url: values.worksheet_url.trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", editingRow.id)
+      .eq("trainer_id", trainerId)
+      .select(
+        `
+        id,
+        trainer_id,
+        name,
+        email,
+        school_name,
+        campus,
+        worksheet_url,
+        created_at,
+        updated_at
+      `
+      )
+      .single();
+
+    if (error) {
+      console.error("[DB] update teacher error", error);
+      alert("Could not save changes. Please try again.");
+      return;
+    }
+
+    const updated = data as TeacherRow;
+    setRows((prev) =>
+      prev.map((r) => (r.id === editingRow.id ? updated : r))
+    );
+    setActiveTeacherId(updated.id);
+    setShowForm(false);
+  };
+
+  const formInitial: TeacherFormState | undefined =
+    formMode === "edit" && editingRow
+      ? {
+          name: editingRow.name,
+          email: editingRow.email ?? "",
+          school_name: editingRow.school_name,
+          campus: editingRow.campus,
+          worksheet_url: editingRow.worksheet_url ?? "",
+        }
+      : undefined;
+
+  // Open worksheet link
+  const handleOpenWorksheet = (row: TeacherRow) => {
+    if (!row.worksheet_url) return;
+    window.open(row.worksheet_url, "_blank", "noopener,noreferrer");
+  };
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <div>
-          <div className="card-title">Teachers</div>
-          <div className="card-subtitle">
-            Manage your teacher list and worksheet links.
+    <>
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Teachers</div>
+            <div className="card-subtitle">
+              Manage your teacher list and worksheet links.
+            </div>
+          </div>
+
+          <div className="toolbar">
+            <div className="toolbar-group">
+              <span>Search</span>
+              <input
+                className="input search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Teacher, school, campus…"
+              />
+            </div>
+
+            <div className="toolbar-group">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={openCreate}
+              >
+                + New teacher
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="toolbar">
-          <div className="toolbar-group">
-            <span>Search</span>
-            <input
-              className="input search-input"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Teacher, school, campus…"
-            />
-          </div>
+        <div className="card-body">
+          {loading && <div>Loading teachers…</div>}
+          {loadError && (
+            <div className="field-error">
+              Could not load teachers ({loadError})
+            </div>
+          )}
 
-          <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={openNewModal}
-            >
-              Add teacher
-            </button>
-          </div>
+          {!loading && filteredRows.length === 0 && !loadError && (
+            <div className="empty-state">
+              <p>No teachers yet.</p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={openCreate}
+              >
+                Add your first teacher
+              </button>
+            </div>
+          )}
+
+          {!loading && filteredRows.length > 0 && (
+            <div className="table-wrapper">
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Teacher</th>
+                    <th>School & campus</th>
+                    <th>Email</th>
+                    <th>Worksheet</th>
+                    <th style={{ width: 140 }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.map((row) => {
+                    const isActive = row.id === activeTeacherId;
+                    return (
+                      <tr
+                        key={row.id}
+                        className={
+                          "simple-table-row" +
+                          (isActive ? " simple-table-row--active" : "")
+                        }
+                        onClick={() => setActiveTeacherId(row.id)}
+                      >
+                        <td>
+                          <div className="entity-cell-main">{row.name}</div>
+                          <div className="entity-cell-sub">
+                            {row.email || "—"}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="entity-cell-main">
+                            {row.school_name}
+                          </div>
+                          <div className="entity-cell-sub">{row.campus}</div>
+                        </td>
+                        <td>
+                          <div className="entity-cell-main">
+                            {row.email || "—"}
+                          </div>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="link-button"
+                            disabled={!row.worksheet_url}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenWorksheet(row);
+                            }}
+                          >
+                            {row.worksheet_url ? "Open" : "Not set"}
+                          </button>
+                        </td>
+                        <td>
+                          <div
+                            className="table-actions"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => openEdit(row)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => handleDelete(row)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
-      {error && (
-        <div style={{ padding: "8px 16px", color: "#f97373", fontSize: 13 }}>
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div style={{ padding: 16, fontSize: 14 }}>Loading teachers…</div>
-      ) : filteredTeachers.length === 0 ? (
-        <div style={{ padding: 16, fontSize: 14 }}>
-          No teachers yet. Click <strong>Add teacher</strong> to create your
-          list.
-        </div>
-      ) : (
-        <div className="teachers-table-wrapper">
-          <table className="teachers-table">
-            <thead>
-              <tr>
-                <th>Teacher</th>
-                <th>School</th>
-                <th>Campus</th>
-                <th>Email</th>
-                <th>Worksheet link</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTeachers.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.name}</td>
-                  <td>{t.school_name}</td>
-                  <td>{t.campus}</td>
-                  <td>{t.email}</td>
-                  <td>
-                    {t.worksheet_url ? (
-                      <a
-                        href={t.worksheet_url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open
-                      </a>
-                    ) : (
-                      <span style={{ opacity: 0.6 }}>Not set</span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={() => openEditModal(t)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      style={{ marginLeft: 8 }}
-                      onClick={() => handleDelete(t)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Modal */}
-      {isModalOpen && (
-        <div className="modal-backdrop">
-          <div className="modal-panel">
-            <div className="modal-header">
-              <div className="modal-title">
-                {editingTeacherId ? "Edit teacher" : "Add teacher"}
-              </div>
-              <button type="button" className="btn" onClick={closeModal}>
-                ×
-              </button>
-            </div>
-
-            <form className="modal-body" onSubmit={handleSubmit}>
-              <div className="form-row">
-                <label>Teacher name</label>
-                <input
-                  className="input"
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => handleFormChange("name", e.target.value)}
-                />
-              </div>
-
-              <div className="form-row">
-                <label>Email</label>
-                <input
-                  className="input"
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => handleFormChange("email", e.target.value)}
-                  placeholder="teacher@example.com"
-                />
-              </div>
-
-              <div className="form-row">
-                <label>School</label>
-                <select
-                  className="select"
-                  value={form.school_name}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setForm((prev) => ({
-                      ...prev,
-                      school_name: value,
-                      campus: "", // reset campus when school changes
-                    }));
-                  }}
-                >
-                  <option value="">Select school…</option>
-                  {schoolOptions.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-row">
-                <label>Campus</label>
-                <select
-                  className="select"
-                  value={form.campus}
-                  onChange={(e) => handleFormChange("campus", e.target.value)}
-                  disabled={!form.school_name}
-                >
-                  <option value="">Select campus…</option>
-                  {campusOptions.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-row">
-                <label>Worksheet link (URL)</label>
-                <input
-                  className="input"
-                  type="url"
-                  value={form.worksheet_url}
-                  onChange={(e) =>
-                    handleFormChange("worksheet_url", e.target.value)
-                  }
-                  placeholder="https://..."
-                />
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={closeModal}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingTeacherId ? "Save changes" : "Create teacher"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      <TeacherFormModal
+        open={showForm}
+        mode={formMode}
+        initial={formInitial}
+        onCancel={() => setShowForm(false)}
+        onSubmit={submitForm}
+      />
+    </>
   );
 };
