@@ -280,13 +280,21 @@ export const DashboardShell: React.FC<DashboardProps> = ({
             };
           }
 
-          const total = parsed.indicators?.length ?? 0;
+          // Normalize indicators into an array no matter what shape old data has
+          const indicatorsArray = Array.isArray(parsed.indicators)
+            ? parsed.indicators
+            : Array.isArray(parsed.indicators?.indicators)
+            ? parsed.indicators.indicators
+            : [];
+
+          // total indicators = length of normalized array
+          const total = indicatorsArray.length;
 
           let good = 0;
           let growth = 0;
           let progress = 0;
 
-          (parsed.indicators ?? []).forEach((ind: any) => {
+          indicatorsArray.forEach((ind: any) => {
             const hasMark = ind.good || ind.growth;
             const hasComment = ind.commentText?.trim().length > 0;
             const hasInk =
@@ -296,7 +304,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
             if (ind.good) good++;
             if (ind.growth) growth++;
           });
-
+        
           let statusColor: StatusColor = "mixed";
           if (growth > 0 && good === 0) statusColor = "growth";
           else if (good > 0 && growth === 0) statusColor = "good";
