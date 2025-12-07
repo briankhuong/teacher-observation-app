@@ -459,6 +459,18 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
   }
 }
 
+// Normalize indicators coming from DB or localStorage so we always have an array
+function normalizeIndicators(raw: any): any[] {
+  if (Array.isArray(raw)) return raw;
+
+  // Some legacy shapes might be { indicators: [...] }
+  if (raw && Array.isArray(raw.indicators)) return raw.indicators;
+
+  // {} / null / undefined → start from empty
+  return [];
+}
+
+
 export const ObservationWorkspaceShell: React.FC<
   ObservationWorkspaceProps
 > = ({ observationMeta, onBack }) => {
@@ -493,8 +505,16 @@ export const ObservationWorkspaceShell: React.FC<
   const [ocrError, setOcrError] = useState<string | null>(null);
 
 
+  useEffect(() => {
+      if (indicators.length === 0) return;
 
-  const active = indicators[activeIndex];
+      if (activeIndex >= indicators.length) {
+        setActiveIndex(0);
+      }
+    }, [indicators.length, activeIndex]);
+
+  const active =
+  indicators[activeIndex] ?? indicators[0] ?? INITIAL_INDICATORS[0];
 
     // Load from localStorage when opening this observation
   useEffect(() => {
@@ -502,62 +522,79 @@ export const ObservationWorkspaceShell: React.FC<
 
   async function load() {
     // 1️⃣ Try localStorage first (fast / offline)
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed: SavedObservationPayload = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.indicators)) {
-          if (cancelled) return;
-          setIndicators(parsed.indicators);
-          setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
-          setLastSavedAt(parsed.updatedAt ?? null);
-          setScratchpadText(parsed.scratchpadText ?? "");
-          return; // ✅ done, no need to hit Supabase
+    // 1️⃣ Try localStorage first (fast / offline)
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed: SavedObservationPayload = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed.indicators)) {
+            if (cancelled) return;
+
+            const normalized = normalizeIndicators(parsed.indicators);
+            const finalIndicators =
+              normalized.length > 0
+                ? (normalized as IndicatorState[])
+                : INITIAL_INDICATORS;
+
+            setIndicators(finalIndicators);
+            setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
+            setLastSavedAt(parsed.updatedAt ?? null);
+            setScratchpadText(parsed.scratchpadText ?? "");
+            return; // ✅ done, no need to hit Supabase
+          }
         }
+      } catch (err) {
+        console.error("Failed to load observation from storage", err);
       }
-    } catch (err) {
-      console.error("Failed to load observation from storage", err);
-    }
 
     // 2️⃣ Nothing in localStorage → load from Supabase
-    try {
-      const row = await loadObservationFromDb(observationMeta.id);
-
-      if (cancelled) return;
-
-      const metaFromDb = (row.meta ?? {}) as any;
-
-      const payload: SavedObservationPayload = {
-        id: row.id,
-        meta: {
-          teacherName:
-            metaFromDb.teacherName ?? observationMeta.teacherName,
-          schoolName:
-            metaFromDb.schoolName ?? observationMeta.schoolName,
-          campus: metaFromDb.campus ?? observationMeta.campus,
-          unit: metaFromDb.unit ?? observationMeta.unit,
-          lesson: metaFromDb.lesson ?? observationMeta.lesson,
-          supportType:
-            metaFromDb.supportType ?? observationMeta.supportType,
-          date: metaFromDb.date ?? observationMeta.date,
-        },
-        indicators: (row.indicators ?? []) as any[],
-        status: row.status ?? "draft",
-        updatedAt: Date.now(),
-        scratchpadText: "", // we don't store this in DB (yet)
-      };
-
-      // cache for next time
+    // 2️⃣ Nothing in localStorage → load from Supabase
       try {
-        localStorage.setItem(storageKey, JSON.stringify(payload));
-      } catch (err) {
-        console.error("Failed to cache observation to localStorage", err);
-      }
+        const row = await loadObservationFromDb(observationMeta.id);
 
-      setIndicators(payload.indicators);
-      setSaveStatus(payload.status === "saved" ? "saved" : "idle");
-      setLastSavedAt(payload.updatedAt);
-      setScratchpadText(payload.scratchpadText ?? "");
+        if (cancelled) return;
+
+        const metaFromDb = (row.meta ?? {}) as any;
+
+        // 1️⃣ Normalize DB indicators & fall back to INITIAL_INDICATORS if empty
+        const normalizedFromDb = normalizeIndicators(row.indicators);
+        const finalIndicators =
+          normalizedFromDb.length > 0
+            ? (normalizedFromDb as IndicatorState[])
+            : INITIAL_INDICATORS;
+
+        const payload: SavedObservationPayload = {
+          id: row.id,
+          meta: {
+            teacherName:
+              metaFromDb.teacherName ?? observationMeta.teacherName,
+            schoolName:
+              metaFromDb.schoolName ?? observationMeta.schoolName,
+            campus: metaFromDb.campus ?? observationMeta.campus,
+            unit: metaFromDb.unit ?? observationMeta.unit,
+            lesson: metaFromDb.lesson ?? observationMeta.lesson,
+            supportType:
+              metaFromDb.supportType ?? observationMeta.supportType,
+            date: metaFromDb.date ?? observationMeta.date,
+          },
+          indicators: finalIndicators,
+          status: row.status ?? "draft",
+          updatedAt: Date.now(),
+          scratchpadText: "", // we don't store this in DB (yet)
+        };
+
+        // cache for next time
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(payload));
+        } catch (err) {
+          console.error("Failed to cache observation to localStorage", err);
+        }
+
+        setIndicators(finalIndicators);
+        setSaveStatus(payload.status === "saved" ? "saved" : "idle");
+        setLastSavedAt(payload.updatedAt);
+        setScratchpadText(payload.scratchpadText ?? "");
+
     } catch (err) {
       console.error("[Workspace] Could not load observation from DB", err);
 

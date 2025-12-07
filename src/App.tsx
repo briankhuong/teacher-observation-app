@@ -428,17 +428,18 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     };
 
     const { data: obs, error: obsError } = await supabase
-      .from("observations")
-      .insert({
-        trainer_id: user.id,
-        teacher_id: teacherId,
-        status: "draft",
-        meta,
-        indicators: {}, // will be filled by workspace auto-save
-        observation_date: date,
-      })
-      .select("id")
-      .single();
+    .from("observations")
+    .insert({
+      trainer_id: user.id,
+      teacher_id: teacherId,
+      status: "draft",
+      meta,
+      indicators: [],           // ✅ FIXED
+      observation_date: date,
+    })
+    .select("id")
+    .single();
+
 
     if (obsError) {
       console.error("[DB] create observation error", obsError);
