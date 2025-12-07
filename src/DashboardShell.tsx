@@ -203,32 +203,35 @@ function groupBy<T>(
 /* ------------------------------
    COMPONENT
 --------------------------------- */
-
 export const DashboardShell: React.FC<DashboardProps> = ({
   onOpenObservation,
 }) => {
- 
-const { user } = useAuth();
- const [observations, setObservations] =
-   useState<DashboardObservationRow[]>([]);
- const [groupMode, setGroupMode] = useState<GroupMode>("month");
- const [sortMode, setSortMode] = useState<SortMode>("newest");
- const [searchText, setSearchText] = useState("");
- // NEW: central modal state for Teacher/Admin actions
- const [actionModal, setActionModal] = useState<{
-   obsId: string;
-   role: "teacher" | "admin";
- } | null>(null);
- // AM summary UI state
-  
+  const { user } = useAuth();
+
+  const [observations, setObservations] =
+    useState<DashboardObservationRow[]>([]);
+  const [groupMode, setGroupMode] = useState<GroupMode>("month");
+  const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [searchText, setSearchText] = useState("");
+
+  // NEW: central modal state for Teacher/Admin actions
+  const [actionModal, setActionModal] = useState<{
+    obsId: string;
+    role: "teacher" | "admin";
+  } | null>(null);
+
+  // NEW: which groups are expanded (key = group.key)
+  const [expandedGroups, setExpandedGroups] = useState<
+    Record<string, boolean>
+  >({});
+
+  // AM summary UI state
   const [showAmSummary, setShowAmSummary] = useState(false);
   const [summaryMonth, setSummaryMonth] = useState<string>("");
   const [summaryAmKey, setSummaryAmKey] = useState<string>("");
   const [summaryRows, setSummaryRows] = useState<AmSummaryRow[]>([]);
   const [amSummarySentMap, setAmSummarySentMap] =
     useState<AmSummarySentMap>({});
-
-  
 
   /* ------------------------------
      LOAD OBSERVATIONS + SUMMARY META
@@ -313,7 +316,7 @@ const { user } = useAuth();
             if (ind.good) good++;
             if (ind.growth) growth++;
           });
-        
+
           let statusColor: StatusColor = "mixed";
           if (growth > 0 && good === 0) statusColor = "growth";
           else if (good > 0 && growth === 0) statusColor = "good";
@@ -351,7 +354,6 @@ const { user } = useAuth();
             progress,
             totalIndicators: total,
             statusColor,
-
             teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
             adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
           });
@@ -539,12 +541,11 @@ const { user } = useAuth();
           const comment = (ind.commentText ?? "").toString().trim();
           const hasComment = comment.length > 0;
 
-          // 🆕 Prefer explicit trainer-summary checkbox
+          // Prefer explicit trainer-summary checkbox
           const explicitlyFlagged =
             ind.includeInTrainerSummary === true && hasComment;
 
-          // 🧯 Fallback for old observations (no checkbox yet):
-          // use Growth + comment so you don't lose history.
+          // Fallback for old observations (no checkbox yet):
           const legacyFlagged =
             ind.includeInTrainerSummary === undefined &&
             !!ind.growth &&
@@ -656,16 +657,14 @@ const { user } = useAuth();
     return new Date(ts).toLocaleString();
   }, [amSummarySentMap, summaryAmKey, summaryMonth]);
 
+  // Observation currently targeted by the Teacher/Admin action modal
+  const modalObservation = React.useMemo(() => {
+    if (!actionModal) return null;
+    return observations.find((o) => o.id === actionModal.obsId) ?? null;
+  }, [actionModal, observations]);
 
-// Observation currently targeted by the Teacher/Admin action modal
- const modalObservation = React.useMemo(() => {
-   if (!actionModal) return null;
-   return (
-     observations.find((o) => o.id === actionModal.obsId) ?? null
-   );
- }, [actionModal, observations]);
   /* ------------------------------
-     CARD RENDERER
+     HANDLERS
   --------------------------------- */
 
   const handlePreCallEmail = (obs: DashboardObservationRow) => {
@@ -693,93 +692,176 @@ const { user } = useAuth();
     // TODO: build + send admin update email
   };
 
-const renderRow = (obs: DashboardObservationRow) => {
-   const handleOpenWorkspace = () => {
-     onOpenObservation({
-       id: obs.id,
-       teacherName: obs.teacherName,
-       schoolName: obs.schoolName,
-       campus: obs.campus,
-       unit: obs.unit,
-       lesson: obs.lesson,
-       supportType: obs.supportType,
-       date: obs.isoDate || "",
-     });
-   };
-   const openTeacherModal = (
-     e: React.MouseEvent<HTMLButtonElement>
-   ) => {
-     e.stopPropagation();
-     setActionModal({ obsId: obs.id, role: "teacher" });
-   };
-   const openAdminModal = (
-     e: React.MouseEvent<HTMLButtonElement>
-   ) => {
-     e.stopPropagation();
-     setActionModal({ obsId: obs.id, role: "admin" });
-   };
-   return (
-<button
-       key={obs.id}
-       type="button"
-       className="obs-row"
-       onClick={handleOpenWorkspace}
->
-<div
-         className={`obs-status-strip ${
-           obs.statusColor === "good"
-             ? "obs-status-good"
-             : obs.statusColor === "growth"
-             ? "obs-status-growth"
-             : "obs-status-mixed"
-         }`}
-       />
-<div className="obs-row-left">
-<div className="obs-row-header">
-<div className="obs-teacher">{obs.teacherName}</div>
-</div>
-<div className="obs-meta">
-           {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
-           {obs.lesson} • {obs.supportType}
-</div>
-         {/* tags row + Teacher/Admin pills under it */}
-<div className="obs-tags-row">
-<div className="obs-tags">
-<span
-               className={
-                 obs.status === "saved"
-                   ? "obs-tag obs-tag-completed"
-                   : "obs-tag obs-tag-draft"
-               }
->
-               {obs.status === "saved" ? "Completed" : "Draft"}
-</span>
-<span className="obs-progress">
-               {obs.progress} / {obs.totalIndicators} indicators
-</span>
-</div>
-<div className="obs-pill-row">
-<button
-               type="button"
-               className="obs-pill-button"
-               onClick={openTeacherModal}
->
-               Teacher…
-</button>
-<button
-               type="button"
-               className="obs-pill-button"
-               onClick={openAdminModal}
->
-               Admin…
-</button>
-</div>
-</div>
-</div>
-<div className="obs-date">{obs.dateLabel}</div>
-</button>
-   );
- };
+  // NEW: toggle group expanded/collapsed
+  const toggleGroupExpanded = (key: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  /* ------------------------------
+     CARD RENDERER
+  --------------------------------- */
+
+const renderRow = (
+  obs: DashboardObservationRow,
+  options?: { disableClick?: boolean }
+) => {
+  const handleOpenWorkspace = () => {
+    if (options?.disableClick) return; // used by stack preview
+    onOpenObservation({
+      id: obs.id,
+      teacherName: obs.teacherName,
+      schoolName: obs.schoolName,
+      campus: obs.campus,
+      unit: obs.unit,
+      lesson: obs.lesson,
+      supportType: obs.supportType,
+      date: obs.isoDate || "",
+    });
+  };
+
+  const openTeacherModal = (
+    e: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    e.stopPropagation();
+    setActionModal({ obsId: obs.id, role: "teacher" });
+  };
+
+  const openAdminModal = (
+    e: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    e.stopPropagation();
+    setActionModal({ obsId: obs.id, role: "admin" });
+  };
+
+  return (
+    <button
+      key={obs.id}
+      type="button"
+      className="obs-row"
+      onClick={handleOpenWorkspace}
+    >
+      <div
+        className={`obs-status-strip ${
+          obs.statusColor === "good"
+            ? "obs-status-good"
+            : obs.statusColor === "growth"
+            ? "obs-status-growth"
+            : "obs-status-mixed"
+        }`}
+      />
+
+      <div className="obs-row-left">
+        <div className="obs-row-header">
+          <div className="obs-teacher">{obs.teacherName}</div>
+        </div>
+
+        <div className="obs-meta">
+          {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
+          {obs.lesson} • {obs.supportType}
+        </div>
+
+        {/* tags row + Teacher/Admin pills under it */}
+        <div className="obs-tags-row">
+          <div className="obs-tags">
+            <span
+              className={
+                obs.status === "saved"
+                  ? "obs-tag obs-tag-completed"
+                  : "obs-tag obs-tag-draft"
+              }
+            >
+              {obs.status === "saved" ? "Completed" : "Draft"}
+            </span>
+            <span className="obs-progress">
+              {obs.progress} / {obs.totalIndicators} indicators
+            </span>
+          </div>
+
+          <div className="obs-pill-row">
+            <button
+              type="button"
+              className="obs-pill-button"
+              onClick={openTeacherModal}
+            >
+              Teacher…
+            </button>
+            <button
+              type="button"
+              className="obs-pill-button"
+              onClick={openAdminModal}
+            >
+              Admin…
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="obs-date">{obs.dateLabel}</div>
+    </button>
+  );
+};
+
+  // NEW: grouped renderer with collapsed stack
+  const renderGroup = (group: {
+  key: string;
+  label: string;
+  items: DashboardObservationRow[];
+}) => {
+  const isExpanded = expandedGroups[group.key] ?? false;
+  const count = group.items.length;
+  const latest = group.items[0];
+
+  return (
+    <div key={group.key} className="obs-group">
+      {/* Group header row */}
+      <button
+        type="button"
+        className="obs-group-header"
+        onClick={() => toggleGroupExpanded(group.key)}
+      >
+        <div className="obs-group-header-main">
+          <div className="obs-group-title">{group.label}</div>
+          <div className="obs-group-meta">
+            {count} {count === 1 ? "observation" : "observations"}
+          </div>
+        </div>
+        <div className="obs-group-chevron">
+          {isExpanded ? "▾" : "▸"}
+        </div>
+      </button>
+
+      {/* Expanded: show full list */}
+      {isExpanded ? (
+        <div className="obs-group-body">
+          {group.items.map((obs) => renderRow(obs))}
+        </div>
+      ) : (
+        /* Collapsed: stacked preview, clicking stack expands group */
+        <div
+          className="obs-group-stack"
+          onClick={() => toggleGroupExpanded(group.key)}
+        >
+          <div className="obs-group-stack-layer obs-group-stack-layer--behind" />
+          <div className="obs-group-stack-layer obs-group-stack-layer--middle" />
+
+          <div className="obs-group-stack-main">
+            {/* render latest card WITHOUT its own onClick */}
+            {renderRow(latest, { disableClick: true })}
+
+            {count > 1 && (
+              <div className="obs-stack-count-overlay">
+                +{count - 1} more
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
   /* ------------------------------
      UI
@@ -859,180 +941,103 @@ const renderRow = (obs: DashboardObservationRow) => {
 
         <div className="obs-list">
           {groupMode === "none" || !grouped
-            ? filteredAndSorted.map(renderRow)
-            : grouped.map((group) => (
-                <div key={group.key} className="obs-month-group">
-                  <div className="obs-month-header">
-                    {group.label}
-                  </div>
-                  {group.items.map(renderRow)}
-                </div>
-              ))}
+            ? filteredAndSorted.map((obs) => renderRow(obs))
+            : grouped.map(renderGroup)}
         </div>
       </div>
-      
+
       {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
-
       {actionModal && modalObservation && (
-<div
-
+        <div
           className="obs-action-modal-backdrop"
-
           onClick={() => setActionModal(null)}
->
-<div
-
+        >
+          <div
             className="obs-action-modal"
-
             onClick={(e) => e.stopPropagation()}
->
-<div className="obs-action-modal-header">
-<div className="obs-action-modal-title">
-
+          >
+            <div className="obs-action-modal-header">
+              <div className="obs-action-modal-title">
                 {actionModal.role === "teacher"
-
                   ? "Teacher actions"
-
                   : "Admin actions"}
-</div>
-<div className="obs-action-modal-subtitle">
-
+              </div>
+              <div className="obs-action-modal-subtitle">
                 {modalObservation.teacherName} –{" "}
-
-                {modalObservation.schoolName} •{" "}
-
-                {modalObservation.campus}
-</div>
-</div>
-<div className="obs-action-modal-body">
-
+                {modalObservation.schoolName} • {modalObservation.campus}
+              </div>
+            </div>
+            <div className="obs-action-modal-body">
               {actionModal.role === "teacher" ? (
-<>
-<button
-
+                <>
+                  <button
                     type="button"
-
                     className="btn"
-
                     onClick={() => {
-
                       setActionModal(null);
-
-                      alert("Pre call email (TODO wire up)");
-
+                      handlePreCallEmail(modalObservation);
                     }}
->
-
+                  >
                     Pre call email
-</button>
-<button
-
+                  </button>
+                  <button
                     type="button"
-
                     className="btn"
-
                     onClick={() => {
-
                       setActionModal(null);
-
-                      alert("Post call email (TODO wire up)");
-
+                      handlePostCallEmail(modalObservation);
                     }}
->
-
+                  >
                     Post call email
-</button>
-<button
-
+                  </button>
+                  <button
                     type="button"
-
                     className="btn"
-
                     onClick={() => {
-
                       setActionModal(null);
-
-                      alert(
-
-                        "Merge teacher workbook (TODO wire up)"
-
-                      );
-
+                      handleMergeTeacherWorkbook(modalObservation);
                     }}
->
-
+                  >
                     Merge teacher workbook
-</button>
-</>
-
+                  </button>
+                </>
               ) : (
-<>
-<button
-
+                <>
+                  <button
                     type="button"
-
                     className="btn"
-
                     onClick={() => {
-
                       setActionModal(null);
-
-                      alert(
-
-                        "Merge admin workbook (TODO wire up)"
-
-                      );
-
+                      handleMergeAdminWorkbook(modalObservation);
                     }}
->
-
+                  >
                     Merge admin workbook
-</button>
-<button
-
+                  </button>
+                  <button
                     type="button"
-
                     className="btn"
-
                     onClick={() => {
-
                       setActionModal(null);
-
-                      alert(
-
-                        "Admin update email (TODO wire up)"
-
-                      );
-
+                      handleAdminUpdateEmail(modalObservation);
                     }}
->
-
+                  >
                     Admin update email
-</button>
-</>
-
+                  </button>
+                </>
               )}
-</div>
-<div className="obs-action-modal-footer">
-<button
-
+            </div>
+            <div className="obs-action-modal-footer">
+              <button
                 type="button"
-
                 className="btn"
-
                 onClick={() => setActionModal(null)}
->
-
+              >
                 Cancel
-</button>
-</div>
-</div>
-</div>
-
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-
-      {/* ---------- AM SUMMARY MODAL ---------- */}
- 
 
       {/* ---------- AM SUMMARY MODAL ---------- */}
       {showAmSummary && (

@@ -2185,3 +2185,361 @@ input[type="date"].input {
   cursor: not-allowed;
   opacity: 0.5;
 }
+
+/* ==== GROUPED OBSERVATIONS (stack style) ==== */
+
+.obs-group {
+  margin-bottom: 14px;
+}
+
+/* clickable header row: label + count + chevron */
+.obs-group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  background: transparent;
+  border: none;
+  padding: 0 4px 4px 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.obs-group-header-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.obs-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.obs-group-meta {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.obs-group-chevron {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+/* full list when expanded */
+.obs-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ==== COLLAPSED STACK PREVIEW ==== */
+/* Stack wrapper */
+.obs-group-stack {
+  position: relative;
+  margin-top: 8px;
+}
+
+/* The two “shadow” layers behind the card */
+.obs-group-stack-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: radial-gradient(circle at top left,
+      rgba(148, 163, 184, 0.12),
+      rgba(15, 23, 42, 0.9));
+}
+
+.obs-group-stack-layer--middle {
+  top: 6px;
+  height: 100%;
+}
+
+.obs-group-stack-layer--behind {
+  top: 12px;
+  height: 100%;
+}
+
+/* Foreground: holds the REAL card */
+.obs-group-stack-main {
+  position: relative;
+  /* push it down so layers peek out */
+  margin-top: 0;
+}
+
+/* Make sure the real card sits above */
+.obs-group-stack-main .obs-row {
+  position: relative;
+  z-index: 1;
+}
+
+/* +N more pill in bottom-right of the card */
+.obs-stack-count-overlay {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  z-index: 2;
+
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.9);
+  color: rgba(209, 213, 219, 0.9);
+}
+
+/* ===========================================
+   Narrow layout (iPad split view / small width)
+   =========================================== */
+@media (max-width: 900px) {
+  /* Overall page padding a bit tighter */
+  body {
+    font-size: 14px;
+  }
+
+  .app-shell,
+  .main-shell {
+    padding: 8px;
+  }
+
+  /* Card layout: header + toolbar stacked instead of 1 long row */
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .card-header > div:first-child {
+    width: 100%;
+  }
+
+  /* Toolbar wraps nicely, each row element uses full width when needed */
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .toolbar-group {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+
+  .toolbar-group span {
+    margin-right: 8px;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .select {
+    max-width: 160px;
+  }
+
+  /* Observation list: cards get a bit more compact */
+  .obs-list {
+    margin-top: 8px;
+    gap: 8px;
+  }
+
+  .obs-row {
+    padding: 10px 12px;
+    min-height: 64px;
+  }
+
+  .obs-row-left {
+    margin-right: 0;
+  }
+
+  .obs-date {
+    font-size: 12px;
+    margin-left: 8px;
+  }
+
+  /* Group headers + stack take full width nicely */
+  .obs-group-header {
+    padding-inline: 10px;
+  }
+
+  .obs-group-stack-main {
+    padding: 10px 12px;
+  }
+
+  .obs-stack-footer span {
+    font-size: 12px;
+  }
+
+  .obs-stack-count-pill {
+    padding: 2px 8px;
+    font-size: 11px;
+  }
+}
+
+/* -------------------------------
+   TOP BAR – desktop style always
+---------------------------------- */
+
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+
+  padding: 10px 24px;
+
+  background: rgba(3, 7, 18, 0.96);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+/* Left: logo + “iPad • Pencil • Excel export” + Trainer pill */
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Your WEBNOTES • TEACHER OBSERVATION label */
+.app-title {
+  font-size: 11px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-muted, #9ca3af);
+  white-space: nowrap;
+}
+
+/* Middle navigation (Dashboard / Teachers / Schools / Sign out) */
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Right: New Observation button etc. */
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;  /* pushes nav + buttons to the right */
+}
+
+/* Pills in the header (you likely already have something like this) */
+.top-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.9);
+  font-size: 11px;
+  padding: 4px 12px;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.top-pill:hover {
+  border-color: rgba(129, 140, 248, 0.9);
+  color: var(--text-strong, #e5e7eb);
+}
+
+/* Active nav pill (Dashboard / Teachers / Schools) */
+.top-pill--active {
+  border-color: rgba(56, 189, 248, 0.9);
+  background: rgba(15, 23, 42, 1);
+  color: var(--text-strong, #e5e7eb);
+}
+
+/* New Observation button – if you need it */
+.top-primary-button {
+  border-radius: 999px;
+  padding: 6px 18px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #0ea5e9;
+  color: #0b1120;
+  border: none;
+  cursor: pointer;
+}
+
+.top-primary-button:hover {
+  background: #38bdf8;
+}
+
+/* Optional: only for *very* tiny widths (portrait phone),
+   iPad split screen will not hit this */
+@media (max-width: 640px) {
+  .top-bar {
+    padding-inline: 12px;
+    gap: 16px;
+  }
+
+  /* Hide long title so bar doesn’t explode */
+  .app-title {
+    display: none;
+  }
+
+  .top-nav {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+/* Make all header pills share the same height & alignment */
+.top-bar-left,
+.top-nav,
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.top-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;          /* fixed height */
+  padding: 0 12px;       /* horizontal only */
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.9);
+  font-size: 11px;
+  line-height: 1;        /* avoid text pushing pill taller */
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.obs-group-toggle-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, border 0.2s;
+}
+
+.obs-group-toggle-pill:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.obs-group-toggle-icon {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.obs-group-toggle-text {
+  opacity: 0.9;
+}

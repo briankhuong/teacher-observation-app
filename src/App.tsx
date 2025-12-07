@@ -84,7 +84,6 @@ const App: React.FC = () => {
       <header className="top-bar">
         <div className="top-bar-left">
           <div className="app-title">WebNotes • Teacher Observation</div>
-          <span className="tag-pill">iPad • Pencil • Excel export</span>
         </div>
 
         <div className="top-bar-right">
