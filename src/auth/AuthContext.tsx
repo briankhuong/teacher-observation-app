@@ -66,19 +66,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   // ----------------------------
   // Sign-in with Azure
   // ----------------------------
-  const signInWithAzure = async () => {
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "azure",
-    });
+ const signInWithAzure = async () => {
+  setLoading(true);
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "azure",
+    options: {
+      // Ask Azure for Graph scopes, including Mail.Send
+      scopes: "openid email profile offline_access User.Read Mail.Send",
+      // Force the consent screen so the new scopes are actually granted
+      queryParams: {
+        prompt: "consent",
+      },
+    },
+  });
 
-    if (error) {
-      console.error("[Auth] Azure sign-in error:", error);
-      alert("Could not sign in. Please try again.");
-      setLoading(false);
-    }
-    // If no error: browser will redirect → we let Supabase restore afterwards.
-  };
+  if (error) {
+    console.error("[Auth] Azure sign-in error:", error);
+    alert("Could not sign in. Please try again.");
+    setLoading(false);
+  }
+};
 
   // ----------------------------
   // Sign-out (local only)

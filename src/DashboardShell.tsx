@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
+import { ObservationCard } from "./components/ObservationCard";
 
 const STORAGE_PREFIX = "obs-v1-";
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
@@ -18,16 +19,16 @@ interface DashboardObservationRow {
   unit: string;
   lesson: string;
   supportType: "Training" | "LVA" | "Visit";
-  /** Human-readable date for display (e.g. 12/4/2025) */
   dateLabel: string;
-  /** Raw ISO date string stored in the observation meta (e.g. "2026-01-10") */
   isoDate: string | null;
-  /** Numeric timestamp used for sorting/grouping */
   rawDate: number | null;
   status: "draft" | "saved";
   progress: number;
   totalIndicators: number;
   statusColor: StatusColor;
+
+  teacherWorkbookUrl?: string | null;
+  adminWorkbookUrl?: string | null;
 }
 
 interface DashboardProps {
@@ -342,6 +343,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
             progress,
             totalIndicators: total,
             statusColor,
+
+            teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
+            adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
           });
         });
       } catch (err) {
@@ -644,63 +648,159 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     return new Date(ts).toLocaleString();
   }, [amSummarySentMap, summaryAmKey, summaryMonth]);
 
+
+
+
+
   /* ------------------------------
      CARD RENDERER
   --------------------------------- */
+  const handlePreCallEmail = (obs: DashboardObservationRow) => {
+    console.log("[Pre-call email] for obs", obs.id);
+    // TODO: plug real pre-call email logic here
+  };
+
+  const handlePostCallEmail = (obs: DashboardObservationRow) => {
+    console.log("[Post-call email] for obs", obs.id);
+    // TODO: plug real post-call email logic here
+  };
+
+  const handleMergeTeacherWorkbook = (obs: DashboardObservationRow) => {
+    console.log("[Merge TEACHER workbook] for obs", obs.id);
+    // TODO: merge into teacher workbook
+  };
+
+  const handleMergeAdminWorkbook = (obs: DashboardObservationRow) => {
+    console.log("[Merge ADMIN workbook] for obs", obs.id);
+    // TODO: merge into admin workbook
+  };
+
+  const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
+    console.log("[Admin update email] for obs", obs.id);
+    // TODO: build + send admin update email
+  };
+
   const renderRow = (obs: DashboardObservationRow) => (
-    <button
-      key={obs.id}
-      type="button"
-      className="obs-row"
-      onClick={() =>
-        onOpenObservation({
-          id: obs.id,
-          teacherName: obs.teacherName,
-          schoolName: obs.schoolName,
-          campus: obs.campus,
-          unit: obs.unit,
-          lesson: obs.lesson,
-          supportType: obs.supportType,
-          // pass through stored ISO date (or empty string if missing for old data)
-          date: obs.isoDate || "",
-        })
-      }
-    >
-      <div
-        className={`obs-status-strip ${
-          obs.statusColor === "good"
-            ? "obs-status-good"
-            : obs.statusColor === "growth"
-            ? "obs-status-growth"
-            : "obs-status-mixed"
-        }`}
-      />
+  <button
+    key={obs.id}
+    type="button"
+    className="obs-row"
+    onClick={() =>
+      onOpenObservation({
+        id: obs.id,
+        teacherName: obs.teacherName,
+        schoolName: obs.schoolName,
+        campus: obs.campus,
+        unit: obs.unit,
+        lesson: obs.lesson,
+        supportType: obs.supportType,
+        date: obs.isoDate || "",
+      })
+    }
+  >
+    <div
+      className={`obs-status-strip ${
+        obs.statusColor === "good"
+          ? "obs-status-good"
+          : obs.statusColor === "growth"
+          ? "obs-status-growth"
+          : "obs-status-mixed"
+      }`}
+    />
+
+    <div className="obs-row-main">
+      {/* LEFT SIDE: teacher + meta + tags + actions */}
       <div className="obs-row-left">
         <div className="obs-row-header">
           <div className="obs-teacher">{obs.teacherName}</div>
         </div>
+
         <div className="obs-meta">
           {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
           {obs.lesson} • {obs.supportType}
         </div>
-        <div className="obs-tags">
-          <span
-            className={
-              obs.status === "saved"
-                ? "obs-tag obs-tag-completed"
-                : "obs-tag obs-tag-draft"
-            }
-          >
-            {obs.status === "saved" ? "Completed" : "Draft"}
-          </span>
-          <span className="obs-progress">
-            {obs.progress} / {obs.totalIndicators} indicators
-          </span>
+
+        {/* status + progress + actions in one bottom row */}
+        <div className="obs-row-bottom">
+          <div className="obs-tags">
+            <span
+              className={
+                obs.status === "saved"
+                  ? "obs-tag obs-tag-completed"
+                  : "obs-tag obs-tag-draft"
+              }
+            >
+              {obs.status === "saved" ? "Completed" : "Draft"}
+            </span>
+            <span className="obs-progress">
+              {obs.progress} / {obs.totalIndicators} indicators
+            </span>
+          </div>
+
+          <div className="obs-card-actions">
+            <button
+              type="button"
+              className="btn-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePreCallEmail(obs);
+              }}
+            >
+              Pre call
+            </button>
+
+            <button
+              type="button"
+              className="btn-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePostCallEmail(obs);
+              }}
+            >
+              Post call
+            </button>
+
+            <button
+              type="button"
+              className="btn-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMergeTeacherWorkbook(obs);
+              }}
+            >
+              Merge teacher
+            </button>
+
+            <button
+              type="button"
+              className="btn-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMergeAdminWorkbook(obs);
+              }}
+            >
+              Merge admin
+            </button>
+
+            <button
+              type="button"
+              className="btn-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAdminUpdateEmail(obs);
+              }}
+            >
+              Admin update
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* RIGHT SIDE: date */}
       <div className="obs-date">{obs.dateLabel}</div>
-    </button>
-  );
+    </div>
+  </button>
+);
 
   /* ------------------------------
      UI

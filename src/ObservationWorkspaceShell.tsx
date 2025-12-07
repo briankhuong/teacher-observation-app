@@ -3,6 +3,7 @@ import { CanvasPad } from "./CanvasPad";
 import React, { useEffect, useRef,useState } from "react";
 import { exportAdminExcel } from "./exportAdminExcel"; // ← NEW
 //import { buildAdminExportModel, type AdminExportModel } from "./exportAdminModel";
+import { emailTeacherReport } from "./emailTeacherReport";
 
 import {
   loadObservationFromDb,
@@ -842,6 +843,66 @@ const handleReopenDraft = async () => {
   setLastSavedAt(payload.updatedAt);
   await persistObservation(payload);
 };
+
+const handleEmailTeacher = async () => {
+  if (canvasDirty) {
+    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+    setCanvasDirty(false);
+  }
+
+  // You probably already have teacher email in meta in a later phase.
+  // For now we pull it from meta if present, or prompt as fallback.
+  const emailFromMeta =
+    (observationMeta as any).teacherEmail ||
+    (observationMeta as any).email ||
+    "";
+
+  const teacherEmail =
+    emailFromMeta ||
+    window.prompt("Teacher email address?", "")?.trim() ||
+    "";
+
+  if (!teacherEmail) {
+    alert("No teacher email provided.");
+    return;
+  }
+
+  const metaForExport: ObservationMetaForExport = {
+    teacherName,
+    schoolName,
+    campus,
+    unit,
+    lesson,
+    supportType,
+    date,
+  };
+
+  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
+    id: ind.id,
+    number: ind.number,
+    title: ind.title,
+    description: ind.description,
+    good: ind.good,
+    growth: ind.growth,
+    commentText: ind.commentText,
+    includeInTrainerSummary: !!ind.includeInTrainerSummary,
+  }));
+
+  const model = buildTeacherExportModel(metaForExport, exportIndicators);
+
+  try {
+    await emailTeacherReport({
+      teacherEmail,
+      teacherName,
+      model,
+    });
+    alert("Teacher report emailed successfully.");
+  } catch (err) {
+    console.error(err);
+    alert("Could not email teacher report. Check console for details.");
+  }
+};
+
 
     const handleExportTeacher = async () => {
     if (canvasDirty) {

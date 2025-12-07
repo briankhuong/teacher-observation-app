@@ -1684,3 +1684,40 @@ input[type="date"].input {
   font-size: 12px;
   color: #6b7280;
 }
+/* make inner layout two columns: left content + right date */
+.obs-row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 100%;
+}
+
+/* bottom line: status/progress + action buttons */
+.obs-row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;          /* space between tags and buttons group */
+  margin-top: 8px;
+}
+
+/* action buttons group */
+.obs-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;           /* space between individual buttons */
+}
+
+/* tiny pill buttons */
+.btn-xs {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+
+.btn-xs:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
