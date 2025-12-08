@@ -34,7 +34,7 @@ const MOCK_OBS: SelectedObservationMeta = {
   schoolName: "VSK Sunshine",
   campus: "Campus A",
   unit: "3",
-  lesson: "2",
+  lesson: "2", 
   supportType: "LVA",
   date: new Date().toISOString().slice(0, 10),
 };

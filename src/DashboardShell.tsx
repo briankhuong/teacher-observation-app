@@ -706,7 +706,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 
 const renderRow = (
   obs: DashboardObservationRow,
-  options?: { disableClick?: boolean }
+  options?: { disableClick?: boolean; hideMergeLinks?: boolean }
 ) => {
   const handleOpenWorkspace = () => {
     if (options?.disableClick) return; // used by stack preview
@@ -735,6 +735,10 @@ const renderRow = (
     e.stopPropagation();
     setActionModal({ obsId: obs.id, role: "admin" });
   };
+
+  const canShowMergeLinks =
+    !options?.hideMergeLinks &&
+    (!!obs.teacherWorkbookUrl || !!obs.adminWorkbookUrl);
 
   return (
     <button
@@ -797,23 +801,99 @@ const renderRow = (
             </button>
           </div>
         </div>
+
+        {/* Merge workbook links strip */}
+        {canShowMergeLinks && (
+          <div className="obs-merge-links">
+            {obs.teacherWorkbookUrl && (
+              <div className="obs-merge-row">
+                <span className="obs-merge-label">Teacher workbook</span>
+                <div className="obs-merge-actions">
+                  <button
+                    type="button"
+                    className="obs-merge-pill"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(
+                        obs.teacherWorkbookUrl as string,
+                        "_blank",
+                        "noopener,noreferrer"
+                      );
+                    }}
+                  >
+                    Open ⧉
+                  </button>
+                  <button
+                    type="button"
+                    className="obs-merge-pill"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (navigator.clipboard?.writeText) {
+                        navigator.clipboard.writeText(
+                          obs.teacherWorkbookUrl as string
+                        );
+                      }
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {obs.adminWorkbookUrl && (
+              <div className="obs-merge-row">
+                <span className="obs-merge-label">Admin workbook</span>
+                <div className="obs-merge-actions">
+                  <button
+                    type="button"
+                    className="obs-merge-pill"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(
+                        obs.adminWorkbookUrl as string,
+                        "_blank",
+                        "noopener,noreferrer"
+                      );
+                    }}
+                  >
+                    Open ⧉
+                  </button>
+                  <button
+                    type="button"
+                    className="obs-merge-pill"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (navigator.clipboard?.writeText) {
+                        navigator.clipboard.writeText(
+                          obs.adminWorkbookUrl as string
+                        );
+                      }
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="obs-date">{obs.dateLabel}</div>
     </button>
   );
 };
-
   // NEW: grouped renderer with collapsed stack
   const renderGroup = (group: {
   key: string;
   label: string;
   items: DashboardObservationRow[];
+  
 }) => {
   const isExpanded = expandedGroups[group.key] ?? false;
   const count = group.items.length;
   const latest = group.items[0];
-
   return (
     <div key={group.key} className="obs-group">
       {/* Group header row */}
@@ -835,30 +915,32 @@ const renderRow = (
 
       {/* Expanded: show full list */}
       {isExpanded ? (
-        <div className="obs-group-body">
-          {group.items.map((obs) => renderRow(obs))}
-        </div>
-      ) : (
-        /* Collapsed: stacked preview, clicking stack expands group */
-        <div
-          className="obs-group-stack"
-          onClick={() => toggleGroupExpanded(group.key)}
-        >
-          <div className="obs-group-stack-layer obs-group-stack-layer--behind" />
-          <div className="obs-group-stack-layer obs-group-stack-layer--middle" />
-
-          <div className="obs-group-stack-main">
-            {/* render latest card WITHOUT its own onClick */}
-            {renderRow(latest, { disableClick: true })}
-
-            {count > 1 && (
-              <div className="obs-stack-count-overlay">
-                +{count - 1} more
-              </div>
-            )}
+          <div className="obs-group-body">
+            {group.items.map((obs) => renderRow(obs))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div
+            className="obs-group-stack"
+            onClick={() => toggleGroupExpanded(group.key)}
+          >
+            <div className="obs-group-stack-layer obs-group-stack-layer--behind" />
+            <div className="obs-group-stack-layer obs-group-stack-layer--middle" />
+
+            <div className="obs-group-stack-main">
+              {/* latest card, but no click + no merge links */}
+              {renderRow(group.items[0], {
+                disableClick: true,
+                hideMergeLinks: true,
+              })}
+
+              {group.items.length > 1 && (
+                <div className="obs-stack-count-overlay">
+                  +{group.items.length - 1} more
+                </div>
+              )}
+            </div>
+          </div>
+        )}
     </div>
   );
 };
