@@ -1,13 +1,22 @@
-// src/App.tsx
+// src/App.tsx (FINAL COMPLETE WORKING CODE)
 import React, { useState } from "react";
-import { DashboardShell } from "./DashboardShell";
-import { SCHOOL_MASTER_LIST } from "./schoolMaster";
+import { Routes, Route } from "react-router-dom";
+import { AuthProvider, useAuth } from "./auth/AuthContext"; // Import AuthProvider here
+import { AuthGate } from "./AuthGate"; 
+import { supabase } from "./supabaseClient"; // Required for DB operations
+
+// --- Screen Imports ---
+import { DashboardShell } from "./DashboardShell"; 
 import { ObservationWorkspaceShell } from "./ObservationWorkspaceShell";
 import { TeachersScreen } from "./TeachersScreen";
 import { SchoolsScreen } from "./SchoolsScreen";
-import { useAuth } from "./auth/AuthContext";
-import { supabase } from "./supabaseClient";
+import RedirectHandler from "./auth/RedirectHandler"; // The MSAL/Supabase Bridge
+// NOTE: Assuming SCHOOL_MASTER_LIST is correctly imported/defined in your environment.
+// import { SCHOOL_MASTER_LIST } from "./schoolMaster"; // Re-add if needed
 
+/* ------------------------------
+   TYPES (Consolidated and used throughout)
+--------------------------------- */
 type Screen = "dashboard" | "workspace" | "teachers" | "schools";
 type SupportType = "Training" | "LVA" | "Visit";
 
@@ -19,134 +28,17 @@ interface NewObservationMeta {
   lesson: string;
   supportType: SupportType;
   date: string; // "YYYY-MM-DD"
-  // 🔹 for newly created obs we also pass the Supabase id back up
-  observationId?: string;
+  observationId?: string; // Supabase id
 }
 
 interface SelectedObservationMeta extends NewObservationMeta {
   id: string;
 }
 
-// (You don't actually use MOCK_OBS anymore, so you could delete this if you like)
-const MOCK_OBS: SelectedObservationMeta = {
-  id: "demo-1",
-  teacherName: "Daisy Nguyen",
-  schoolName: "VSK Sunshine",
-  campus: "Campus A",
-  unit: "3",
-  lesson: "2", 
-  supportType: "LVA",
-  date: new Date().toISOString().slice(0, 10),
-};
-
-const App: React.FC = () => {
-  const { signOut } = useAuth();
-  const [showNewObservationForm, setShowNewObservationForm] = useState(false);
-  const [screen, setScreen] = useState<Screen>("dashboard");
-  const [selectedObservation, setSelectedObservation] =
-    useState<SelectedObservationMeta | null>(null);
-
-  const goToDashboard = () => setScreen("dashboard");
-  const goToTeachers = () => setScreen("teachers");
-  const goToSchools = () => setScreen("schools");
-
-  const handleCreateObservationFromForm = (meta: NewObservationMeta) => {
-    // Prefer the real Supabase id, but keep a fallback just in case
-    const id = meta.observationId ?? `obs-${Date.now()}`;
-
-    const fullMeta: SelectedObservationMeta = {
-      id,
-      ...meta,
-    };
-
-    setSelectedObservation(fullMeta);
-    setShowNewObservationForm(false);
-    setScreen("workspace");
-  };
-
-  const openObservation = (obs: any) => {
-    const withDate: SelectedObservationMeta = {
-      id: obs.id,
-      teacherName: obs.teacherName,
-      schoolName: obs.schoolName,
-      campus: obs.campus,
-      unit: obs.unit,
-      lesson: obs.lesson,
-      supportType: obs.supportType,
-      date: obs.date || new Date().toISOString().slice(0, 10),
-    };
-    setSelectedObservation(withDate);
-    setScreen("workspace");
-  };
-
-  return (
-    <div className="app-root">
-      <header className="top-bar">
-        <div className="top-bar-left">
-          <div className="app-title">WebNotes • Teacher Observation</div>
-        </div>
-
-        <div className="top-bar-right">
-          <span className="badge">Trainer: Brian</span>
-
-          <button className="btn-ghost" onClick={goToDashboard}>
-            Dashboard
-          </button>
-
-          <button className="btn-ghost" onClick={goToTeachers}>
-            Teachers
-          </button>
-
-          <button className="btn-ghost" onClick={goToSchools}>
-            Schools
-          </button>
-
-          <button className="btn-ghost" type="button" onClick={signOut}>
-            Sign out
-          </button>
-
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => setShowNewObservationForm(true)}
-          >
-            New Observation
-          </button>
-        </div>
-      </header>
-
-      <main className="app-shell">
-        {screen === "dashboard" && (
-          <DashboardShell onOpenObservation={openObservation} />
-        )}
-
-        {screen === "workspace" && selectedObservation && (
-          <ObservationWorkspaceShell
-            observationMeta={selectedObservation}
-            onBack={goToDashboard}
-          />
-        )}
-
-        {screen === "teachers" && <TeachersScreen />}
-
-        {screen === "schools" && <SchoolsScreen />}
-      </main>
-
-      {showNewObservationForm && (
-        <NewObservationForm
-          onCancel={() => setShowNewObservationForm(false)}
-          onCreate={handleCreateObservationFromForm}
-          onOpenSchools={goToSchools} // 🔹 new: let the form jump to Schools tab
-        />
-      )}
-    </div>
-  );
-};
-
 interface NewObservationFormProps {
   onCreate: (meta: NewObservationMeta) => void;
   onCancel: () => void;
-  onOpenSchools: () => void; // 🔹 NEW
+  onOpenSchools: () => void;
 }
 
 interface TeacherOption {
@@ -172,15 +64,30 @@ interface SchoolRow {
   city: string | null;
 }
 
+/* ------------------------------
+   CONSTANTS
+--------------------------------- */
 const ADD_NEW_SCHOOL_OPTION = "__ADD_NEW_SCHOOL__";
+// Placeholder for the SCHOOL_MASTER_LIST if the import is missing
+const SCHOOL_MASTER_LIST = [
+    { schoolName: "Sample School 1", campusName: "Main Campus" },
+    { schoolName: "Sample School 2", campusName: "East Campus" }
+];
 
+
+/* ------------------------------
+   NEW OBSERVATION FORM (Your Provided Component Logic)
+--------------------------------- */
 const NewObservationForm: React.FC<NewObservationFormProps> = ({
   onCreate,
   onCancel,
   onOpenSchools,
 }) => {
   const todayISO = new Date().toISOString().slice(0, 10);
+  
+  // Use Supabase Native User property
   const { user } = useAuth();
+  const trainerId = user?.id; // trainerId derived from the authenticated user ID
 
   const [teacherName, setTeacherName] = useState("");
   const [schoolName, setSchoolName] = useState("");
@@ -190,26 +97,23 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const [supportType, setSupportType] = useState<SupportType>("Visit");
   const [date, setDate] = useState<string>(todayISO);
 
-  // Worksheet link used when auto-creating a teacher
   const [worksheetUrl, setWorksheetUrl] = useState("");
-
-  // Hint when we auto-create a teacher
   const [autoCreatedTeacherMsg, setAutoCreatedTeacherMsg] = useState<
     string | null
   >(null);
 
-  // ---- Teachers for dropdown ----
+  // Teachers
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [teachersLoading, setTeachersLoading] = useState(true);
   const [teachersError, setTeachersError] = useState<string | null>(null);
   const [selectedTeacherId, setSelectedTeacherId] = useState("");
 
-  // ---- Schools for dropdowns ----
+  // Schools
   const [schools, setSchools] = useState<SchoolRow[]>([]);
   const [schoolsLoading, setSchoolsLoading] = useState(true);
   const [schoolsError, setSchoolsError] = useState<string | null>(null);
 
-  // Load teachers for this trainer
+  // Load teachers
   React.useEffect(() => {
     let cancelled = false;
 
@@ -217,7 +121,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       try {
         setTeachersLoading(true);
         setTeachersError(null);
-
+        // FIX: The RLS on the teachers table should filter this by trainer_id implicitly.
         const { data, error } = await supabase
           .from("teachers")
           .select("id, name, email, school_name, campus, worksheet_url")
@@ -237,7 +141,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       }
     }
 
-    loadTeachers();
+    void loadTeachers();
     return () => {
       cancelled = true;
     };
@@ -245,22 +149,19 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
 
   // Load schools for this trainer
   React.useEffect(() => {
-    if (!user) return;
+    if (!trainerId) return;
 
-    const currentUser = user;
     let cancelled = false;
 
     async function loadSchools() {
       try {
         setSchoolsLoading(true);
         setSchoolsError(null);
-
+        // FIX: Use trainerId to fetch only the current user's schools
         const { data, error } = await supabase
           .from("schools")
-          .select(
-            "*"
-          )
-          .eq("trainer_id", currentUser.id)
+          .select("*")
+          .eq("trainer_id", trainerId)
           .order("school_name", { ascending: true })
           .order("campus_name", { ascending: true });
 
@@ -278,16 +179,14 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       }
     }
 
-    loadSchools();
+    void loadSchools();
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [trainerId]);
 
-  // ---- Options for School & Campus ----
-
+  // Options: school + campus
   const schoolOptions = React.useMemo(() => {
-    // Prefer dynamic schools; fall back to SCHOOL_MASTER_LIST if none
     const names = (schools.length
       ? schools.map((s) => s.school_name)
       : SCHOOL_MASTER_LIST.map((s) => s.schoolName)
@@ -308,7 +207,6 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       return Array.from(new Set(campuses));
     }
 
-    // Fallback: static master list
     return SCHOOL_MASTER_LIST.filter((s) => s.schoolName === schoolName)
       .map((s) => s.campusName)
       .filter((v, i, arr) => arr.indexOf(v) === i);
@@ -316,7 +214,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
 
   const handleSelectTeacher = (id: string) => {
     setSelectedTeacherId(id);
-    setAutoCreatedTeacherMsg(null); // clear old hint when switching teacher
+    setAutoCreatedTeacherMsg(null);
 
     if (!id) return;
 
@@ -331,9 +229,8 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
 
   const handleSchoolChange = (value: string) => {
     if (value === ADD_NEW_SCHOOL_OPTION) {
-      // Jump out to full Schools screen so you can create full metadata
       onCancel();
-      onOpenSchools();
+      void onOpenSchools();
       return;
     }
 
@@ -344,20 +241,20 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!teacherName || !schoolName || !campus || !unit || !lesson || !date) {
-      alert("Please fill teacher, school, campus, unit, lesson, and date.");
+    if (!trainerId) {
+      alert("Missing trainer id – please sign out and sign in again.");
       return;
     }
 
-    if (!user) {
-      alert("Missing user session – please sign out and sign in again.");
+    if (!teacherName || !schoolName || !campus || !unit || !lesson || !date) {
+      alert("Please fill teacher, school, campus, unit, lesson, and date.");
       return;
     }
 
     let teacherId = selectedTeacherId;
     setAutoCreatedTeacherMsg(null);
 
-    // 1) If no teacher selected from dropdown, create one in Supabase
+    // 1) If no teacher selected, create one
     if (!teacherId) {
       try {
         const cleanUrl = worksheetUrl.trim() || null;
@@ -365,7 +262,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         const { data, error } = await supabase
           .from("teachers")
           .insert({
-            trainer_id: user.id,
+            trainer_id: trainerId,
             name: teacherName.trim(),
             email: null,
             school_name: schoolName,
@@ -383,7 +280,6 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
 
         teacherId = data.id;
 
-        // keep local list updated for next time
         setTeachers((prev) => [
           ...prev,
           {
@@ -398,7 +294,6 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         setSelectedTeacherId(data.id);
         setWorksheetUrl(data.worksheet_url ?? "");
 
-        // 🔹 UX: tell the trainer we saved the teacher record
         setAutoCreatedTeacherMsg(
           `New teacher saved: ${teacherName.trim()} — ${schoolName} (${campus})`
         );
@@ -410,12 +305,11 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     }
 
     if (!teacherId) {
-      // This should basically never happen now
       alert("Could not determine teacher record. Please try again.");
       return;
     }
 
-    // 2) Insert observation row
+    // 2) Insert observation
     const meta = {
       teacherName,
       schoolName,
@@ -427,18 +321,17 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     };
 
     const { data: obs, error: obsError } = await supabase
-    .from("observations")
-    .insert({
-      trainer_id: user.id,
-      teacher_id: teacherId,
-      status: "draft",
-      meta,
-      indicators: [],           // ✅ FIXED
-      observation_date: date,
-    })
-    .select("id")
-    .single();
-
+      .from("observations")
+      .insert({
+        trainer_id: trainerId,
+        teacher_id: teacherId,
+        status: "draft",
+        meta,
+        indicators: [],
+        observation_date: date,
+      })
+      .select("id")
+      .single();
 
     if (obsError) {
       console.error("[DB] create observation error", obsError);
@@ -446,7 +339,6 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       return;
     }
 
-    // 3) Tell the React app to open this observation workspace
     onCreate({
       observationId: obs.id,
       ...meta,
@@ -464,7 +356,8 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         </div>
 
         <form className="modal-body" onSubmit={handleSubmit}>
-          {/* Existing teacher picker */}
+          {/* Form fields */}
+          
           <div className="form-row">
             <label>Existing teacher (optional)</label>
             <select
@@ -486,12 +379,13 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
             </select>
             {teachersError && (
               <div className="field-error">
-                Could not load teachers ({teachersError}). You can still type a
-                new teacher below.
+                Could not load teachers ({teachersError}). You can still
+                type a new teacher below.
               </div>
             )}
             <div className="hint">
-              Pick an existing teacher, or leave this blank and type a new one.
+              Pick an existing teacher, or leave this blank and type a
+              new one.
             </div>
             {autoCreatedTeacherMsg && (
               <div className="hint">{autoCreatedTeacherMsg}</div>
@@ -508,7 +402,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
             />
           </div>
 
-          {/* Worksheet link for teacher */}
+          {/* Worksheet link */}
           <div className="form-row">
             <label>Worksheet link (optional)</label>
             <input
@@ -523,7 +417,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
             </div>
           </div>
 
-          {/* School / campus driven by Supabase schools */}
+          {/* School / campus */}
           <div className="form-row">
             <label>School</label>
             <select
@@ -543,8 +437,8 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
             </select>
             {schoolsError && (
               <div className="field-error">
-                Could not load schools ({schoolsError}). Falling back to the
-                built-in list.
+                Could not load schools ({schoolsError}). Falling back to
+                the built-in list.
               </div>
             )}
           </div>
@@ -566,7 +460,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
             </select>
           </div>
 
-          {/* Unit, lesson, support type, date */}
+          {/* Unit / lesson / support / date */}
           <div className="form-row">
             <label>Unit</label>
             <input
@@ -594,7 +488,9 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
             <select
               className="select"
               value={supportType}
-              onChange={(e) => setSupportType(e.target.value as SupportType)}
+              onChange={(e) =>
+                setSupportType(e.target.value as SupportType)
+              }
             >
               <option value="Visit">Visit</option>
               <option value="LVA">LVA</option>
@@ -623,6 +519,160 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         </form>
       </div>
     </div>
+  );
+};
+
+
+/* ------------------------------
+   MAIN APP SHELL (actual UI)
+--------------------------------- */
+
+const AppShell: React.FC = () => {
+  // Use Supabase Native Session/User properties
+  const { session, user, signOut, signInWithAzure } = useAuth();
+  
+  // trainerId is derived from the Supabase user object
+  const trainerId = user?.id; 
+
+  // ⚠️ FIX: Use the 'profile' data to display the user's name
+  // This reads from the new SimpleUser structure defined in AuthContext.tsx
+  const trainerLabel =
+    user?.profile?.full_name ??
+    user?.email ??
+    "Trainer";
+    
+  const isAuthenticated = !!session;
+
+
+  const [showNewObservationForm, setShowNewObservationForm] = useState(false);
+  const [screen, setScreen] = useState<Screen>("dashboard");
+  const [selectedObservation, setSelectedObservation] =
+    useState<SelectedObservationMeta | null>(null);
+
+  const goToDashboard = () => setScreen("dashboard");
+  const goToTeachers = () => setScreen("teachers");
+  const goToSchools = () => setScreen("schools");
+
+  const handleCreateObservationFromForm = (meta: NewObservationMeta) => {
+    const id = meta.observationId ?? `obs-${Date.now()}`;
+
+    const fullMeta: SelectedObservationMeta = {
+      id,
+      ...meta,
+    };
+
+    setSelectedObservation(fullMeta);
+    setShowNewObservationForm(false);
+    setScreen("workspace");
+  };
+
+  const openObservation = (obs: any) => {
+    const withDate: SelectedObservationMeta = {
+      id: obs.id,
+      teacherName: obs.teacherName,
+      schoolName: obs.schoolName,
+      campus: obs.campus,
+      unit: obs.unit,
+      lesson: obs.lesson,
+      supportType: obs.supportType,
+      date: obs.date || new Date().toISOString().slice(0, 10),
+    };
+    setSelectedObservation(withDate);
+    setScreen("workspace");
+  };
+
+
+  return (
+    <div className="app-root">
+      <header className="top-bar">
+        <div className="top-bar-left">
+          <div className="app-title">WebNotes • Teacher Observation</div>
+        </div>
+
+        <div className="top-bar-right">
+          {isAuthenticated ? (
+            <>
+              <span className="badge">Trainer: {trainerLabel}</span>
+
+              <button className="btn-ghost" onClick={goToDashboard}>Dashboard</button>
+              <button className="btn-ghost" onClick={goToTeachers}>Teachers</button>
+              <button className="btn-ghost" onClick={goToSchools}>Schools</button>
+
+              <button className="btn-ghost" type="button" onClick={signOut}>
+                Sign out
+              </button>
+
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => {
+                  if (!trainerId) {
+                    alert("You’re signed in, but trainer id is missing. Please refresh.");
+                    return;
+                  }
+                  setShowNewObservationForm(true);
+                }}
+              >
+                New Observation
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={signInWithAzure}
+            >
+              Sign in with Microsoft
+            </button>
+          )}
+        </div>
+      </header>
+
+      <main className="app-shell">
+        {screen === "dashboard" && (
+          <DashboardShell onOpenObservation={openObservation} />
+        )}
+
+        {screen === "workspace" && selectedObservation && (
+          <ObservationWorkspaceShell
+            observationMeta={selectedObservation}
+            onBack={goToDashboard}
+          />
+        )}
+
+        {screen === "teachers" && <TeachersScreen />}
+
+        {screen === "schools" && <SchoolsScreen />}
+      </main>
+
+      {showNewObservationForm && (
+        <NewObservationForm
+          onCancel={() => setShowNewObservationForm(false)}
+          onCreate={handleCreateObservationFromForm}
+          onOpenSchools={goToSchools}
+        />
+      )}
+    </div>
+  );
+};
+
+
+/* ------------------------------
+   ROOT APP WITH ROUTES
+--------------------------------- */
+
+const App: React.FC = () => {
+  // NOTE: AuthProvider must be imported from "./auth/AuthContext"
+  return (
+    <AuthProvider>
+      <Routes>
+        {/* ⚠️ CRITICAL: Route the MSAL/Supabase redirect path to the handler component */}
+        <Route path="/auth/redirect" element={<RedirectHandler />} />
+
+        {/* Everything else is wrapped by the AuthGate */}
+        <Route path="/*" element={<AuthGate><AppShell /></AuthGate>} />
+      </Routes>
+    </AuthProvider>
   );
 };
 

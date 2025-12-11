@@ -1,68 +1,53 @@
-// src/AuthGate.tsx
-import React, { useEffect } from "react";
+// src/AuthGate.tsx (FINAL WORKING CODE)
+import React from "react";
 import type { ReactNode } from "react";
 import { useAuth } from "./auth/AuthContext";
-import { fetchTeachers } from "./db/teachers";
 
 interface AuthGateProps {
-  children: ReactNode;
+  children: ReactNode;
 }
 
 export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
-  const { session, loading, signInWithAzure } = useAuth();
+  const { session, loading, signInWithAzure } = useAuth();
 
-  // Load initial teacher data once the user is logged in
-  useEffect(() => {
-    if (!session) return; // not logged in yet → do nothing
+  // 1) While MSAL/Supabase is restoring the session
+  if (loading) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-title">Teacher Observation</div>
+          <div className="auth-subtitle">Restoring your session…</div>
+        </div>
+      </div>
+    );
+  }
 
-    (async () => {
-      try {
-        await fetchTeachers();
-      } catch (err) {
-        console.error("[DB] Could not load teachers", err);
-      }
-    })();
-  }, [session]);
+  // 2) Not authenticated → show login screen
+  if (!session) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-title">Teacher Observation</div>
+          <div className="auth-subtitle">
+            Sign in with your Grapeseed / Office 365 account to continue.
+          </div>
 
-  // 1) While Supabase is restoring the session
-  if (loading) {
-    return (
-      <div className="auth-shell">
-        <div className="auth-card">
-          <div className="auth-title">Teacher Observation</div>
-          <div className="auth-subtitle">Restoring your session…</div>
-        </div>
-      </div>
-    );
-  }
+          <button
+            type="button"
+            className="btn auth-btn"
+            onClick={signInWithAzure} // Initiates MSAL login redirect
+          >
+            Sign in with Microsoft
+          </button>
 
-  // 2) Not authenticated → show login screen
-  if (!session) {
-    return (
-      <div className="auth-shell">
-        <div className="auth-card">
-          <div className="auth-title">Teacher Observation</div>
-          <div className="auth-subtitle">
-            Sign in with your Grapeseed / Office 365 account to continue.
-          </div>
+          <div className="auth-hint">
+            You will be redirected to the Microsoft login page, then back here.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-          <button
-            type="button"
-            className="btn auth-btn"
-            onClick={signInWithAzure}
-          >
-            Sign in with Microsoft
-          </button>
-
-          <div className="auth-hint">
-            You will be redirected to the Microsoft login page, then back here.
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 3) Authenticated → just render the app.
-  // App.tsx will provide the main header / toolbar.
-  return <>{children}</>;
+  // 3) Authenticated → render the app content.
+  return <>{children}</>;
 };

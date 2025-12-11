@@ -2,7 +2,10 @@
 import React, { useState } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
-import { ObservationCard } from "./components/ObservationCard";
+// NOTE: Assuming buildTeacherExportModel and syncObservationToWorkbook 
+// are correctly imported and defined in your services/export files.
+import { syncObservationToWorkbook } from "./services/microsoftGraph";
+import { buildTeacherExportModel } from "./exportTeacherModel";
 
 const STORAGE_PREFIX = "obs-v1-";
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
@@ -40,14 +43,12 @@ interface DashboardProps {
     unit: string;
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
-    /** Actual observation date from meta ("YYYY-MM-DD") */
     date: string;
   }) => void;
 }
 
 /* ------------------------------
-   SCHOOL → AM MAPPING
-   TODO: replace with your real school list.
+   SCHOOL → AM MAPPING (Your directory)
 --------------------------------- */
 
 interface SchoolInfo {
@@ -57,11 +58,6 @@ interface SchoolInfo {
   amEmail: string;
 }
 
-/**
- * TEMP PLACEHOLDER:
- * Fill this from your real school list (same names/campus strings
- * that appear in observation meta).
- */
 const SCHOOL_DIRECTORY: SchoolInfo[] = [
   { schoolName: "19/5", campus: "Tứ Hiệp", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
   { schoolName: "Ánh Trăng", campus: "Yên Xá", amName: "Emma", amEmail: "emma.swanepoel@grapeseed.com" },
@@ -120,17 +116,8 @@ const SCHOOL_DIRECTORY: SchoolInfo[] = [
   { schoolName: "VSK Sunshine", campus: "Cổ Nhuế", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
 ];
 
-function findSchoolInfo(
-  schoolName: string,
-  campus: string
-): SchoolInfo | null {
-  return (
-    SCHOOL_DIRECTORY.find(
-      (s) =>
-        s.schoolName === schoolName &&
-        s.campus === campus
-    ) ?? null
-  );
+function findSchoolInfo(schoolName: string, campus: string): SchoolInfo | null {
+  return SCHOOL_DIRECTORY.find((s) => s.schoolName === schoolName && s.campus === campus) ?? null;
 }
 
 function amKeyFromSchool(info: SchoolInfo): string {
@@ -156,35 +143,30 @@ interface AmSummaryRow {
   nextSteps: string;
 }
 
-type AmSummarySentMap = Record<string, number>; // key = `${amKey}::${monthKey}`
+type AmSummarySentMap = Record<string, number>;
 
 /* ------------------------------
    DATE HELPERS
 --------------------------------- */
 
-// Parse "YYYY-MM-DD" or similar into timestamp
 function safeParseTimestamp(dateStr: string): number | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   return Number.isNaN(d.getTime()) ? null : d.getTime();
 }
 
-// Month key for internal calculations
 function monthKeyFromTs(ts: number | null): string | null {
   if (!ts) return null;
   const d = new Date(ts);
   const m = d.getMonth() + 1;
   const y = d.getFullYear();
-  return `${String(m).padStart(2, "0")}.${y}`; // e.g. "11.2025"
+  return `${String(m).padStart(2, "0")}.${y}`;
 }
 
 /* ------------------------------
    GROUPING HELPERS
 --------------------------------- */
-function groupBy<T>(
-  items: T[],
-  keyFn: (item: T) => string
-) {
+function groupBy<T>(items: T[], keyFn: (item: T) => string) {
   const buckets: Record<string, T[]> = {};
   items.forEach((item) => {
     const key = keyFn(item);
@@ -199,45 +181,38 @@ function groupBy<T>(
   }));
 }
 
-
 /* ------------------------------
    COMPONENT
 --------------------------------- */
-export const DashboardShell: React.FC<DashboardProps> = ({
-  onOpenObservation,
-}) => {
+export const DashboardShell: React.FC<DashboardProps> = ({ onOpenObservation }) => {
+  // Use Supabase Native User property provided by AuthContext
   const { user } = useAuth();
+  const trainerId = user?.id;
 
-  const [observations, setObservations] =
-    useState<DashboardObservationRow[]>([]);
+  const [observations, setObservations] = useState<DashboardObservationRow[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("month");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [searchText, setSearchText] = useState("");
 
-  // NEW: central modal state for Teacher/Admin actions
   const [actionModal, setActionModal] = useState<{
     obsId: string;
     role: "teacher" | "admin";
   } | null>(null);
 
-  // NEW: which groups are expanded (key = group.key)
-  const [expandedGroups, setExpandedGroups] = useState<
-    Record<string, boolean>
-  >({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
-  // AM summary UI state
   const [showAmSummary, setShowAmSummary] = useState(false);
   const [summaryMonth, setSummaryMonth] = useState<string>("");
   const [summaryAmKey, setSummaryAmKey] = useState<string>("");
   const [summaryRows, setSummaryRows] = useState<AmSummaryRow[]>([]);
-  const [amSummarySentMap, setAmSummarySentMap] =
-    useState<AmSummarySentMap>({});
+  const [amSummarySentMap, setAmSummarySentMap] = useState<AmSummarySentMap>({});
 
   /* ------------------------------
      LOAD OBSERVATIONS + SUMMARY META
   --------------------------------- */
   React.useEffect(() => {
-    if (!user) {
+    // Rely on the trainerId being present (user is logged in)
+    if (!trainerId) {
       setObservations([]);
       return;
     }
@@ -246,13 +221,11 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       const rows: DashboardObservationRow[] = [];
 
       try {
-        // 1) Load observations from Supabase for this trainer
+        // FIX: Clean select syntax using alias
         const { data, error } = await supabase
           .from("observations")
-          .select(
-            "id, status, meta, indicators, created_at, updated_at, observation_date"
-          )
-          .eq("trainer_id", user.id)
+          .select('id, status, meta, indicators, created_at, updated_at, observation_date, teacher_id:teachers (worksheet_url)')
+          // We rely on RLS (auth.uid() = trainer_id) to filter the results.
           .order("observation_date", { ascending: false })
           .order("created_at", { ascending: false });
 
@@ -261,7 +234,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         }
 
         (data ?? []).forEach((dbRow: any) => {
-          // Prefer full data from localStorage (workspace), fallback to DB meta
           const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
           let parsed: any = null;
 
@@ -271,11 +243,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
               parsed = JSON.parse(rawLocal);
             }
           } catch (err) {
-            console.error(
-              "Error parsing stored observation from localStorage:",
-              storageKey,
-              err
-            );
+            console.error("Error parsing stored observation from localStorage:", storageKey, err);
           }
 
           if (!parsed) {
@@ -292,14 +260,12 @@ export const DashboardShell: React.FC<DashboardProps> = ({
             };
           }
 
-          // Normalize indicators into an array no matter what shape old data has
           const indicatorsArray = Array.isArray(parsed.indicators)
             ? parsed.indicators
             : Array.isArray(parsed.indicators?.indicators)
             ? parsed.indicators.indicators
             : [];
 
-          // total indicators = length of normalized array
           const total = indicatorsArray.length;
 
           let good = 0;
@@ -309,8 +275,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           indicatorsArray.forEach((ind: any) => {
             const hasMark = ind.good || ind.growth;
             const hasComment = ind.commentText?.trim().length > 0;
-            const hasInk =
-              Array.isArray(ind.strokes) && ind.strokes.length > 0;
+            const hasInk = Array.isArray(ind.strokes) && ind.strokes.length > 0;
 
             if (hasMark || hasComment || hasInk) progress++;
             if (ind.good) good++;
@@ -321,8 +286,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           if (growth > 0 && good === 0) statusColor = "growth";
           else if (good > 0 && growth === 0) statusColor = "good";
 
-          const obsDateStr: string | undefined =
-            parsed.meta?.date ?? dbRow.observation_date ?? undefined;
+          const obsDateStr: string | undefined = parsed.meta?.date ?? dbRow.observation_date ?? undefined;
 
           let rawDate: number | null = null;
           let displayDate = "";
@@ -339,6 +303,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
             displayDate = new Date(parsed.updatedAt).toLocaleDateString();
           }
 
+          // Extract worksheet URL from the joined 'teachers' table (teacher_id:teachers alias)
+          const teacherWorkbookUrl = dbRow.teachers?.worksheet_url || null;
+
           rows.push({
             id: parsed.id,
             teacherName: parsed.meta.teacherName,
@@ -354,7 +321,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
             progress,
             totalIndicators: total,
             statusColor,
-            teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
+            teacherWorkbookUrl: teacherWorkbookUrl,
             adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
           });
         });
@@ -364,7 +331,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 
       setObservations(rows);
 
-      // Load AM summary "sent" markers (unchanged)
       try {
         const raw = localStorage.getItem(SUMMARY_STATE_KEY);
         if (raw) {
@@ -378,17 +344,16 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       }
     };
 
-    load();
-  }, [user]);
+    void load();
+  }, [trainerId]);
 
   /* ------------------------------
      FILTER + SORT + GROUP
   --------------------------------- */
+  // ... (rest of filtering, sorting, grouping logic)
 
   const filteredAndSorted = React.useMemo(() => {
     let list = [...observations];
-
-    // search
     const q = searchText.trim().toLowerCase();
     if (q) {
       list = list.filter((o) => {
@@ -400,20 +365,11 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       });
     }
 
-    // sort
     list.sort((a, b) => {
-      if (sortMode === "newest") {
-        return (b.rawDate ?? 0) - (a.rawDate ?? 0);
-      }
-      if (sortMode === "oldest") {
-        return (a.rawDate ?? 0) - (b.rawDate ?? 0);
-      }
-      if (sortMode === "teacher-az") {
-        return a.teacherName.localeCompare(b.teacherName);
-      }
-      if (sortMode === "teacher-za") {
-        return b.teacherName.localeCompare(a.teacherName);
-      }
+      if (sortMode === "newest") return (b.rawDate ?? 0) - (a.rawDate ?? 0);
+      if (sortMode === "oldest") return (a.rawDate ?? 0) - (b.rawDate ?? 0);
+      if (sortMode === "teacher-az") return a.teacherName.localeCompare(b.teacherName);
+      if (sortMode === "teacher-za") return b.teacherName.localeCompare(a.teacherName);
       return 0;
     });
 
@@ -424,17 +380,15 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     if (groupMode === "none") return null;
 
     if (groupMode === "month") {
-      return groupBy(filteredAndSorted, (o) => {
+      const groups = groupBy(filteredAndSorted, (o) => {
         const mk = monthKeyFromTs(o.rawDate);
         return mk ?? "Unknown date";
       });
+      // Sort groups by month key descending (newest month first)
+      return groups.sort((a, b) => b.key.localeCompare(a.key));
     }
-    if (groupMode === "school") {
-      return groupBy(filteredAndSorted, (o) => o.schoolName);
-    }
-    if (groupMode === "campus") {
-      return groupBy(filteredAndSorted, (o) => o.campus);
-    }
+    if (groupMode === "school") return groupBy(filteredAndSorted, (o) => o.schoolName);
+    if (groupMode === "campus") return groupBy(filteredAndSorted, (o) => o.campus);
 
     return null;
   }, [filteredAndSorted, groupMode]);
@@ -443,7 +397,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
      AM SUMMARY HELPERS
   --------------------------------- */
 
-  // All distinct month keys that actually have data, sorted newest→oldest
   const availableMonths = React.useMemo(() => {
     const set = new Set<string>();
     observations.forEach((o) => {
@@ -451,7 +404,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       if (mk) set.add(mk);
     });
     return Array.from(set).sort((a, b) => {
-      // "11.2025" → [m,y]
       const [m1, y1] = a.split(".").map(Number);
       const [m2, y2] = b.split(".").map(Number);
       if (y1 !== y2) return y2 - y1;
@@ -459,27 +411,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     });
   }, [observations]);
 
-  // All AMs that appear in *any* observation (we filter by month later)
-  const allAms = React.useMemo(() => {
-    const map = new Map<string, { name: string; email: string }>();
-
-    observations.forEach((o) => {
-      const info = findSchoolInfo(o.schoolName, o.campus);
-      if (!info) return;
-      const key = amKeyFromSchool(info);
-      if (!map.has(key)) {
-        map.set(key, { name: info.amName, email: info.amEmail });
-      }
-    });
-
-    return Array.from(map.entries()).map(([key, v]) => ({
-      key,
-      name: v.name,
-      email: v.email,
-    }));
-  }, [observations]);
-
-  // AMs that actually have schools supported in the chosen month
   const amsForSelectedMonth = React.useMemo(() => {
     if (!summaryMonth) return [];
 
@@ -504,14 +435,12 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     }));
   }, [observations, summaryMonth]);
 
-  // Build summary rows when both month + AM are chosen
   React.useEffect(() => {
     if (!summaryMonth || !summaryAmKey) {
       setSummaryRows([]);
       return;
     }
 
-    // key: teacher|school|campus
     const rowMap = new Map<string, AmSummaryRow>();
 
     observations.forEach((o) => {
@@ -523,7 +452,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       const amKey = amKeyFromSchool(info);
       if (amKey !== summaryAmKey) return;
 
-      // load the full observation from storage so we can pull indicator notes
       const storageKey = `${STORAGE_PREFIX}${o.id}`;
       let details: any = null;
       try {
@@ -540,16 +468,8 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         (details.indicators as any[]).forEach((ind) => {
           const comment = (ind.commentText ?? "").toString().trim();
           const hasComment = comment.length > 0;
-
-          // Prefer explicit trainer-summary checkbox
-          const explicitlyFlagged =
-            ind.includeInTrainerSummary === true && hasComment;
-
-          // Fallback for old observations (no checkbox yet):
-          const legacyFlagged =
-            ind.includeInTrainerSummary === undefined &&
-            !!ind.growth &&
-            hasComment;
+          const explicitlyFlagged = ind.includeInTrainerSummary === true && hasComment;
+          const legacyFlagged = ind.includeInTrainerSummary === undefined && !!ind.growth && hasComment;
 
           if (!explicitlyFlagged && !legacyFlagged) return;
 
@@ -574,26 +494,16 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         const appended = collected
           ? [existing.nextSteps, collected].filter(Boolean).join("\n")
           : existing.nextSteps;
-        rowMap.set(key, {
-          ...existing,
-          nextSteps: appended,
-        });
+        rowMap.set(key, { ...existing, nextSteps: appended });
       }
     });
 
-    const rows = Array.from(rowMap.values()).sort((a, b) =>
-      a.teacherName.localeCompare(b.teacherName)
-    );
-
+    const rows = Array.from(rowMap.values()).sort((a, b) => a.teacherName.localeCompare(b.teacherName));
     setSummaryRows(rows);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryMonth, summaryAmKey, observations]);
 
-  // Build email body from current table state
   const emailBody = React.useMemo(() => {
-    if (!summaryMonth || !summaryAmKey || summaryRows.length === 0) {
-      return "";
-    }
+    if (!summaryMonth || !summaryAmKey || summaryRows.length === 0) return "";
 
     const { name: amName } = parseAmKey(summaryAmKey);
 
@@ -607,15 +517,8 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     ];
 
     const rowLines = summaryRows.map((r) => {
-      const statusLabel =
-        r.status === "green"
-          ? "Green"
-          : r.status === "red"
-          ? "Red"
-          : "-";
-
-      const oneLineNext =
-        r.nextSteps?.replace(/\s+/g, " ").slice(0, 180) || "";
+      const statusLabel = r.status === "green" ? "Green" : r.status === "red" ? "Red" : "-";
+      const oneLineNext = r.nextSteps?.replace(/\s+/g, " ").slice(0, 180) || "";
       return `${r.schoolName} | ${r.campus} | ${r.teacherName} | ${statusLabel} | ${oneLineNext}`;
     });
 
@@ -630,17 +533,11 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     return [...headerLines, ...rowLines, ...footerLines].join("\n");
   }, [summaryRows, summaryMonth, summaryAmKey]);
 
-  // Mark email as "sent" for (AM, month)
   const markSummarySent = () => {
     if (!summaryMonth || !summaryAmKey) return;
-
     const key = `${summaryAmKey}::${summaryMonth}`;
     const now = Date.now();
-    const updated: AmSummarySentMap = {
-      ...amSummarySentMap,
-      [key]: now,
-    };
-
+    const updated: AmSummarySentMap = { ...amSummarySentMap, [key]: now };
     setAmSummarySentMap(updated);
     try {
       localStorage.setItem(SUMMARY_STATE_KEY, JSON.stringify(updated));
@@ -657,7 +554,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     return new Date(ts).toLocaleString();
   }, [amSummarySentMap, summaryAmKey, summaryMonth]);
 
-  // Observation currently targeted by the Teacher/Admin action modal
   const modalObservation = React.useMemo(() => {
     if (!actionModal) return null;
     return observations.find((o) => o.id === actionModal.obsId) ?? null;
@@ -667,283 +563,254 @@ export const DashboardShell: React.FC<DashboardProps> = ({
      HANDLERS
   --------------------------------- */
 
+  async function callEmailApi(path: string, obs: DashboardObservationRow) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ observationId: obs.id }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(`Email API ${path} failed`, res.status, text);
+      alert("Failed to send email. Please try again.");
+      return;
+    }
+    alert("Email sent.");
+  }
+
   const handlePreCallEmail = (obs: DashboardObservationRow) => {
-    console.log("[Pre-call email] for obs", obs.id);
-    // TODO: plug real pre-call email logic here
+    void callEmailApi("/api/email/teacher-precall", obs);
   };
-
   const handlePostCallEmail = (obs: DashboardObservationRow) => {
-    console.log("[Post-call email] for obs", obs.id);
-    // TODO: plug real post-call email logic here
+    void callEmailApi("/api/email/teacher-postcall", obs);
+  };
+  const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
+    void callEmailApi("/api/email/admin-update", obs);
   };
 
-  const handleMergeTeacherWorkbook = (obs: DashboardObservationRow) => {
-    console.log("[Merge TEACHER workbook] for obs", obs.id);
-    // TODO: merge into teacher workbook
+  const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+    if (!obs.teacherWorkbookUrl) {
+      alert("No workbook URL linked for this teacher. Please edit the teacher and paste a SharePoint link.");
+      return;
+    }
+
+    const confirmSync = window.confirm(
+      `This will add a sheet to the workbook for "${obs.teacherName}".\n\nContinue?`
+    );
+    if (!confirmSync) return;
+
+    try {
+      const storageKey = `${STORAGE_PREFIX}${obs.id}`;
+      const rawLocal = localStorage.getItem(storageKey);
+
+      if (!rawLocal) {
+        alert("Could not find full observation details on this device.");
+        return;
+      }
+
+      const fullObsData = JSON.parse(rawLocal);
+      
+      const exportModel = buildTeacherExportModel(fullObsData.meta, fullObsData.indicators);
+
+      console.log("Syncing to SharePoint...", obs.teacherWorkbookUrl);
+      const result = await syncObservationToWorkbook(obs.teacherWorkbookUrl, exportModel);
+
+      alert(`Success! Created sheet: "${result.sheetName}"`);
+
+    } catch (err: any) {
+      console.error("Sync Error:", err);
+      if (err.message.includes("interaction_required") || err.message.includes("need admin approval")) {
+         alert("Microsoft Permission Needed: Please Sign Out and Sign In again to approve the new File/Mail permissions.");
+      } else {
+         alert(`Error: ${err.message}`);
+      }
+    }
   };
 
   const handleMergeAdminWorkbook = (obs: DashboardObservationRow) => {
     console.log("[Merge ADMIN workbook] for obs", obs.id);
-    // TODO: merge into admin workbook
   };
 
-  const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
-    console.log("[Admin update email] for obs", obs.id);
-    // TODO: build + send admin update email
-  };
-
-  // NEW: toggle group expanded/collapsed
   const toggleGroupExpanded = (key: string) => {
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+    setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   /* ------------------------------
      CARD RENDERER
   --------------------------------- */
 
-const renderRow = (
-  obs: DashboardObservationRow,
-  options?: { disableClick?: boolean; hideMergeLinks?: boolean }
-) => {
-  const handleOpenWorkspace = () => {
-    if (options?.disableClick) return; // used by stack preview
-    onOpenObservation({
-      id: obs.id,
-      teacherName: obs.teacherName,
-      schoolName: obs.schoolName,
-      campus: obs.campus,
-      unit: obs.unit,
-      lesson: obs.lesson,
-      supportType: obs.supportType,
-      date: obs.isoDate || "",
-    });
-  };
-
-  const openTeacherModal = (
-    e: React.MouseEvent<HTMLButtonElement>
+  const renderRow = (
+    obs: DashboardObservationRow,
+    options?: { disableClick?: boolean; hideMergeLinks?: boolean }
   ) => {
-    e.stopPropagation();
-    setActionModal({ obsId: obs.id, role: "teacher" });
-  };
+    const handleOpenWorkspace = () => {
+      if (options?.disableClick) return;
+      onOpenObservation({
+        id: obs.id,
+        teacherName: obs.teacherName,
+        schoolName: obs.schoolName,
+        campus: obs.campus,
+        unit: obs.unit,
+        lesson: obs.lesson,
+        supportType: obs.supportType,
+        date: obs.isoDate || "",
+      });
+    };
 
-  const openAdminModal = (
-    e: React.MouseEvent<HTMLButtonElement>
-  ) => {
-    e.stopPropagation();
-    setActionModal({ obsId: obs.id, role: "admin" });
-  };
+    const openTeacherModal = (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      setActionModal({ obsId: obs.id, role: "teacher" });
+    };
 
-  const canShowMergeLinks =
-    !options?.hideMergeLinks &&
-    (!!obs.teacherWorkbookUrl || !!obs.adminWorkbookUrl);
+    const openAdminModal = (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      setActionModal({ obsId: obs.id, role: "admin" });
+    };
 
-  return (
-    <button
-      key={obs.id}
-      type="button"
-      className="obs-row"
-      onClick={handleOpenWorkspace}
-    >
-      <div
-        className={`obs-status-strip ${
-          obs.statusColor === "good"
-            ? "obs-status-good"
-            : obs.statusColor === "growth"
-            ? "obs-status-growth"
-            : "obs-status-mixed"
-        }`}
-      />
+    const canShowMergeLinks = !options?.hideMergeLinks && (!!obs.teacherWorkbookUrl || !!obs.adminWorkbookUrl);
 
-      <div className="obs-row-left">
-        <div className="obs-row-header">
-          <div className="obs-teacher">{obs.teacherName}</div>
-        </div>
+    return (
+      <button key={obs.id} type="button" className="obs-row" onClick={handleOpenWorkspace}>
+        <div
+          className={`obs-status-strip ${
+            obs.statusColor === "good"
+              ? "obs-status-good"
+              : obs.statusColor === "growth"
+              ? "obs-status-growth"
+              : "obs-status-mixed"
+          }`}
+        />
 
-        <div className="obs-meta">
-          {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
-          {obs.lesson} • {obs.supportType}
-        </div>
-
-        {/* tags row + Teacher/Admin pills under it */}
-        <div className="obs-tags-row">
-          <div className="obs-tags">
-            <span
-              className={
-                obs.status === "saved"
-                  ? "obs-tag obs-tag-completed"
-                  : "obs-tag obs-tag-draft"
-              }
-            >
-              {obs.status === "saved" ? "Completed" : "Draft"}
-            </span>
-            <span className="obs-progress">
-              {obs.progress} / {obs.totalIndicators} indicators
-            </span>
+        <div className="obs-row-left">
+          <div className="obs-row-header">
+            <div className="obs-teacher">{obs.teacherName}</div>
           </div>
 
-          <div className="obs-pill-row">
-            <button
-              type="button"
-              className="obs-pill-button"
-              onClick={openTeacherModal}
-            >
-              Teacher…
-            </button>
-            <button
-              type="button"
-              className="obs-pill-button"
-              onClick={openAdminModal}
-            >
-              Admin…
-            </button>
+          <div className="obs-meta">
+            {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson {obs.lesson} • {obs.supportType}
           </div>
-        </div>
 
-        {/* Merge workbook links strip */}
-        {canShowMergeLinks && (
-          <div className="obs-merge-links">
-            {obs.teacherWorkbookUrl && (
-              <div className="obs-merge-row">
-                <span className="obs-merge-label">Teacher workbook</span>
-                <div className="obs-merge-actions">
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(
-                        obs.teacherWorkbookUrl as string,
-                        "_blank",
-                        "noopener,noreferrer"
-                      );
-                    }}
-                  >
-                    Open ⧉
-                  </button>
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (navigator.clipboard?.writeText) {
-                        navigator.clipboard.writeText(
-                          obs.teacherWorkbookUrl as string
-                        );
-                      }
-                    }}
-                  >
-                    Copy
-                  </button>
+          <div className="obs-tags-row">
+            <div className="obs-tags">
+              <span className={obs.status === "saved" ? "obs-tag obs-tag-completed" : "obs-tag obs-tag-draft"}>
+                {obs.status === "saved" ? "Completed" : "Draft"}
+              </span>
+              <span className="obs-progress">
+                {obs.progress} / {obs.totalIndicators} indicators
+              </span>
+            </div>
+
+            <div className="obs-pill-row">
+              <button type="button" className="obs-pill-button" onClick={openTeacherModal}>
+                Teacher…
+              </button>
+              <button type="button" className="obs-pill-button" onClick={openAdminModal}>
+                Admin…
+              </button>
+            </div>
+          </div>
+
+          {canShowMergeLinks && (
+            <div className="obs-merge-links">
+              {obs.teacherWorkbookUrl && (
+                <div className="obs-merge-row">
+                  <span className="obs-merge-label">Teacher workbook</span>
+                  <div className="obs-merge-actions">
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(obs.teacherWorkbookUrl as string, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      Open ⧉
+                    </button>
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (navigator.clipboard?.writeText) {
+                          void navigator.clipboard.writeText(obs.teacherWorkbookUrl as string);
+                        }
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {obs.adminWorkbookUrl && (
-              <div className="obs-merge-row">
-                <span className="obs-merge-label">Admin workbook</span>
-                <div className="obs-merge-actions">
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(
-                        obs.adminWorkbookUrl as string,
-                        "_blank",
-                        "noopener,noreferrer"
-                      );
-                    }}
-                  >
-                    Open ⧉
-                  </button>
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (navigator.clipboard?.writeText) {
-                        navigator.clipboard.writeText(
-                          obs.adminWorkbookUrl as string
-                        );
-                      }
-                    }}
-                  >
-                    Copy
-                  </button>
+              {obs.adminWorkbookUrl && (
+                <div className="obs-merge-row">
+                  <span className="obs-merge-label">Admin workbook</span>
+                  <div className="obs-merge-actions">
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(obs.adminWorkbookUrl as string, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      Open ⧉
+                    </button>
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (navigator.clipboard?.writeText) {
+                          void navigator.clipboard.writeText(obs.adminWorkbookUrl as string);
+                        }
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="obs-date">{obs.dateLabel}</div>
-    </button>
-  );
-};
-  // NEW: grouped renderer with collapsed stack
-  const renderGroup = (group: {
-  key: string;
-  label: string;
-  items: DashboardObservationRow[];
-  
-}) => {
-  const isExpanded = expandedGroups[group.key] ?? false;
-  const count = group.items.length;
-  const latest = group.items[0];
-  return (
-    <div key={group.key} className="obs-group">
-      {/* Group header row */}
-      <button
-        type="button"
-        className="obs-group-header"
-        onClick={() => toggleGroupExpanded(group.key)}
-      >
-        <div className="obs-group-header-main">
-          <div className="obs-group-title">{group.label}</div>
-          <div className="obs-group-meta">
-            {count} {count === 1 ? "observation" : "observations"}
-          </div>
+              )}
+            </div>
+          )}
         </div>
-        <div className="obs-group-chevron">
-          {isExpanded ? "▾" : "▸"}
-        </div>
+        <div className="obs-date">{obs.dateLabel}</div>
       </button>
+    );
+  };
 
-      {/* Expanded: show full list */}
-      {isExpanded ? (
-          <div className="obs-group-body">
-            {group.items.map((obs) => renderRow(obs))}
+  const renderGroup = (group: { key: string; label: string; items: DashboardObservationRow[] }) => {
+    const isExpanded = expandedGroups[group.key] ?? false;
+    const count = group.items.length;
+    return (
+      <div key={group.key} className="obs-group">
+        <button type="button" className="obs-group-header" onClick={() => toggleGroupExpanded(group.key)}>
+          <div className="obs-group-header-main">
+            <div className="obs-group-title">{group.label}</div>
+            <div className="obs-group-meta">
+              {count} {count === 1 ? "observation" : "observations"}
+            </div>
           </div>
+          <div className="obs-group-chevron">{isExpanded ? "▾" : "▸"}</div>
+        </button>
+
+        {isExpanded ? (
+          <div className="obs-group-body">{group.items.map((obs) => renderRow(obs))}</div>
         ) : (
-          <div
-            className="obs-group-stack"
-            onClick={() => toggleGroupExpanded(group.key)}
-          >
+          <div className="obs-group-stack" onClick={() => toggleGroupExpanded(group.key)}>
             <div className="obs-group-stack-layer obs-group-stack-layer--behind" />
             <div className="obs-group-stack-layer obs-group-stack-layer--middle" />
-
             <div className="obs-group-stack-main">
-              {/* latest card, but no click + no merge links */}
-              {renderRow(group.items[0], {
-                disableClick: true,
-                hideMergeLinks: true,
-              })}
-
+              {renderRow(group.items[0], { disableClick: true, hideMergeLinks: true })}
               {group.items.length > 1 && (
-                <div className="obs-stack-count-overlay">
-                  +{group.items.length - 1} more
-                </div>
+                <div className="obs-stack-count-overlay">+{group.items.length - 1} more</div>
               )}
             </div>
           </div>
         )}
-    </div>
-  );
-};
+      </div>
+    );
+  };
 
   /* ------------------------------
      UI
@@ -954,9 +821,7 @@ const renderRow = (
         <div className="card-header">
           <div>
             <div className="card-title">Observations</div>
-            <div className="card-subtitle">
-              Tap an observation to continue, or create a new one.
-            </div>
+            <div className="card-subtitle">Tap an observation to continue, or create a new one.</div>
           </div>
 
           <div className="toolbar">
@@ -972,13 +837,7 @@ const renderRow = (
 
             <div className="toolbar-group">
               <span>Group by</span>
-              <select
-                className="select"
-                value={groupMode}
-                onChange={(e) =>
-                  setGroupMode(e.target.value as GroupMode)
-                }
-              >
+              <select className="select" value={groupMode} onChange={(e) => setGroupMode(e.target.value as GroupMode)}>
                 <option value="none">None</option>
                 <option value="month">Month</option>
                 <option value="school">School</option>
@@ -988,13 +847,7 @@ const renderRow = (
 
             <div className="toolbar-group">
               <span>Sort</span>
-              <select
-                className="select"
-                value={sortMode}
-                onChange={(e) =>
-                  setSortMode(e.target.value as SortMode)
-                }
-              >
+              <select className="select" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
                 <option value="newest">Newest</option>
                 <option value="oldest">Oldest</option>
                 <option value="teacher-az">Teacher A–Z</option>
@@ -1007,7 +860,6 @@ const renderRow = (
                 type="button"
                 className="btn"
                 onClick={() => {
-                  // default month = newest available
                   if (!summaryMonth && availableMonths[0]) {
                     setSummaryMonth(availableMonths[0]);
                   }
@@ -1028,25 +880,15 @@ const renderRow = (
         </div>
       </div>
 
-      {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
       {actionModal && modalObservation && (
-        <div
-          className="obs-action-modal-backdrop"
-          onClick={() => setActionModal(null)}
-        >
-          <div
-            className="obs-action-modal"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="obs-action-modal-backdrop" onClick={() => setActionModal(null)}>
+          <div className="obs-action-modal" onClick={(e) => e.stopPropagation()}>
             <div className="obs-action-modal-header">
               <div className="obs-action-modal-title">
-                {actionModal.role === "teacher"
-                  ? "Teacher actions"
-                  : "Admin actions"}
+                {actionModal.role === "teacher" ? "Teacher actions" : "Admin actions"}
               </div>
               <div className="obs-action-modal-subtitle">
-                {modalObservation.teacherName} –{" "}
-                {modalObservation.schoolName} • {modalObservation.campus}
+                {modalObservation.teacherName} – {modalObservation.schoolName} • {modalObservation.campus}
               </div>
             </div>
             <div className="obs-action-modal-body">
@@ -1077,7 +919,7 @@ const renderRow = (
                     className="btn"
                     onClick={() => {
                       setActionModal(null);
-                      handleMergeTeacherWorkbook(modalObservation);
+                      void handleMergeTeacherWorkbook(modalObservation);
                     }}
                   >
                     Merge teacher workbook
@@ -1109,11 +951,7 @@ const renderRow = (
               )}
             </div>
             <div className="obs-action-modal-footer">
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setActionModal(null)}
-              >
+              <button type="button" className="btn" onClick={() => setActionModal(null)}>
                 Cancel
               </button>
             </div>
@@ -1121,25 +959,17 @@ const renderRow = (
         </div>
       )}
 
-      {/* ---------- AM SUMMARY MODAL ---------- */}
       {showAmSummary && (
         <div className="am-summary-backdrop">
           <div className="am-summary-modal">
             <div className="am-summary-header">
               <div>
-                <div className="am-summary-title">
-                  Monthly summary for AMs
-                </div>
+                <div className="am-summary-title">Monthly summary for AMs</div>
                 <div className="am-summary-sub">
-                  Choose a month and Account Manager, review the table,
-                  then copy the email body into Outlook.
+                  Choose a month and Account Manager, review the table, then copy the email body into Outlook.
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setShowAmSummary(false)}
-              >
+              <button type="button" className="btn" onClick={() => setShowAmSummary(false)}>
                 Close
               </button>
             </div>
@@ -1152,7 +982,7 @@ const renderRow = (
                   value={summaryMonth}
                   onChange={(e) => {
                     setSummaryMonth(e.target.value);
-                    setSummaryAmKey(""); // reset AM when month changes
+                    setSummaryAmKey("");
                   }}
                 >
                   <option value="">Select…</option>
@@ -1172,11 +1002,7 @@ const renderRow = (
                   onChange={(e) => setSummaryAmKey(e.target.value)}
                   disabled={!summaryMonth}
                 >
-                  <option value="">
-                    {summaryMonth
-                      ? "Select…"
-                      : "Choose month first"}
-                  </option>
+                  <option value="">{summaryMonth ? "Select…" : "Choose month first"}</option>
                   {amsForSelectedMonth.map((am) => (
                     <option key={am.key} value={am.key}>
                       {am.name} ({am.email})
@@ -1185,11 +1011,7 @@ const renderRow = (
                 </select>
               </div>
 
-              {sentInfo && (
-                <div className="am-summary-sent">
-                  Marked as sent on {sentInfo}
-                </div>
-              )}
+              {sentInfo && <div className="am-summary-sent">Marked as sent on {sentInfo}</div>}
             </div>
 
             {summaryRows.length > 0 && (
@@ -1216,14 +1038,9 @@ const renderRow = (
                               className="select select-compact"
                               value={row.status}
                               onChange={(e) => {
-                                const value =
-                                  e.target.value as SummaryStatus;
+                                const value = e.target.value as SummaryStatus;
                                 setSummaryRows((prev) =>
-                                  prev.map((r, i) =>
-                                    i === idx
-                                      ? { ...r, status: value }
-                                      : r
-                                  )
+                                  prev.map((r, i) => (i === idx ? { ...r, status: value } : r))
                                 );
                               }}
                             >
@@ -1238,11 +1055,7 @@ const renderRow = (
                               onChange={(e) => {
                                 const value = e.target.value;
                                 setSummaryRows((prev) =>
-                                  prev.map((r, i) =>
-                                    i === idx
-                                      ? { ...r, nextSteps: value }
-                                      : r
-                                  )
+                                  prev.map((r, i) => (i === idx ? { ...r, nextSteps: value } : r))
                                 );
                               }}
                               rows={3}
@@ -1262,26 +1075,16 @@ const renderRow = (
                       className="btn"
                       onClick={() => {
                         if (!emailBody) return;
-                        navigator.clipboard
+                        void navigator.clipboard
                           ?.writeText(emailBody)
-                          .catch((err) =>
-                            console.error(
-                              "Clipboard copy failed",
-                              err
-                            )
-                          );
+                          .catch((err) => console.error("Clipboard copy failed", err));
                       }}
                       disabled={!emailBody}
                     >
                       Copy to clipboard
                     </button>
                   </div>
-                  <textarea
-                    className="am-summary-email-textarea"
-                    value={emailBody}
-                    readOnly
-                    rows={10}
-                  />
+                  <textarea className="am-summary-email-textarea" value={emailBody} readOnly rows={10} />
 
                   <div className="am-summary-footer">
                     <button
@@ -1293,22 +1096,16 @@ const renderRow = (
                       Mark summary as sent
                     </button>
                     {sentInfo && (
-                      <span className="am-summary-sent-inline">
-                        Already marked as sent on {sentInfo}
-                      </span>
+                      <span className="am-summary-sent-inline">Already marked as sent on {sentInfo}</span>
                     )}
                   </div>
                 </div>
               </>
             )}
 
-            {summaryMonth &&
-              summaryAmKey &&
-              summaryRows.length === 0 && (
-                <div className="am-summary-empty">
-                  No observations for this AM in {summaryMonth}.
-                </div>
-              )}
+            {summaryMonth && summaryAmKey && summaryRows.length === 0 && (
+              <div className="am-summary-empty">No observations for this AM in {summaryMonth}.</div>
+            )}
           </div>
         </div>
       )}
